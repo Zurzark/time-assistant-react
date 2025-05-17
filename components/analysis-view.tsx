@@ -13,21 +13,29 @@ import {
   PieChart,
   TrendingUp,
   Zap,
+  Menu,
 } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useSidebar } from "@/components/ui/sidebar"
 
 export function AnalysisView() {
   const [timeRange, setTimeRange] = useState("week")
+  const { setOpen } = useSidebar()
 
   return (
     <div className="flex flex-col p-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">回顾与分析</h1>
-          <p className="text-muted-foreground">分析您的时间使用情况和任务完成情况</p>
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => setOpen(true)} className="md:hidden">
+            <Menu className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">回顾与分析</h1>
+            <p className="text-muted-foreground">分析您的时间使用情况和任务完成情况</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon">

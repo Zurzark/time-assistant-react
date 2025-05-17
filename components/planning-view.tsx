@@ -3,7 +3,17 @@
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CalendarIcon, ChevronLeft, ChevronRight, Clock, Sparkles, Target, CheckCircle2, Info } from "lucide-react"
+import {
+  CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Sparkles,
+  Target,
+  CheckCircle2,
+  Info,
+  Menu,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
@@ -12,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { useSidebar } from "@/components/ui/sidebar"
 
 const tasks = [
   {
@@ -108,6 +119,7 @@ export function PlanningView() {
   const [view, setView] = useState("day")
   const [selectedTasks, setSelectedTasks] = useState([1, 2, 3, 5])
   const [aiPlanGenerated, setAiPlanGenerated] = useState(false)
+  const { setOpen } = useSidebar()
 
   const toggleTaskSelection = (taskId) => {
     setSelectedTasks((prev) => (prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]))
@@ -120,9 +132,14 @@ export function PlanningView() {
   return (
     <div className="flex flex-col p-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">计划制定</h1>
-          <p className="text-muted-foreground">智能规划您的日程和任务</p>
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => setOpen(true)} className="md:hidden">
+            <Menu className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">计划制定</h1>
+            <p className="text-muted-foreground">智能规划您的日程和任务</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon">

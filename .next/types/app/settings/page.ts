@@ -1,4 +1,4 @@
-// File: F:\Software\Web_Project\time-assistant-react\app\settings\page.tsx
+// File: F:\Software\Web_Project\time-assistant-react-v2\app\settings\page.tsx
 import * as entry from '../../../../app/settings/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

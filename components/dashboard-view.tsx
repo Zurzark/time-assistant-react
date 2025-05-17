@@ -1,32 +1,141 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
-import { Play, Pause, Check, Plus, Clock, CheckCircle2, AlertCircle, Lightbulb } from "lucide-react"
+import { Play, Pause, Check, Plus, Clock, CheckCircle2, AlertCircle, Lightbulb, Menu } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { useSidebar } from "@/components/ui/sidebar"
+import { TaskFormDialog, type Task } from "@/components/task-form-dialog"
+import { toast } from "@/components/ui/use-toast"
 
 export function DashboardView() {
   const [timerActive, setTimerActive] = useState(false)
   const [timerMinutes, setTimerMinutes] = useState(25)
   const [timerSeconds, setTimerSeconds] = useState(0)
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false)
+  const [quickTaskInput, setQuickTaskInput] = useState("")
+  const [tasks, setTasks] = useState<Task[]>([
+    {
+      id: 1,
+      title: "完成产品设计方案",
+      description: "为新版应用完成用户界面设计和交互流程",
+      priority: "high",
+      dueDate: "2025-05-17",
+      estimatedTime: 120,
+      project: "产品开发",
+      status: "in-progress",
+      tags: ["设计", "UI/UX"],
+    },
+  ])
+  const { setOpen } = useSidebar()
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 处理番茄钟计时
+  useEffect(() => {
+    if (timerActive) {
+      timerRef.current = setInterval(() => {
+        setTimerSeconds((prevSeconds) => {
+          if (prevSeconds === 0) {
+            if (timerMinutes === 0) {
+              // 计时结束
+              setTimerActive(false)
+              clearInterval(timerRef.current!)
+              toast({
+                title: "番茄钟完成",
+                description: "您已完成一个番茄钟周期！",
+              })
+              return 0
+            }
+            // 减少一分钟，重置秒数为59
+            setTimerMinutes((prevMinutes) => prevMinutes - 1)
+            return 59
+          }
+          return prevSeconds - 1
+        })
+      }, 1000)
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current)
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
+    }
+  }, [timerActive, timerMinutes])
 
   const toggleTimer = () => {
     setTimerActive(!timerActive)
   }
 
+  const resetTimer = () => {
+    setTimerActive(false)
+    setTimerMinutes(25)
+    setTimerSeconds(0)
+    toast({
+      title: "任务完成",
+      description: "恭喜您完成了当前任务！",
+    })
+  }
+
+  const handleNewTask = () => {
+    setTaskDialogOpen(true)
+  }
+
+  const handleSaveTask = (taskData: Omit<Task, "id">) => {
+    const newTask: Task = {
+      ...taskData,
+      id: tasks.length > 0 ? Math.max(...tasks.map((t) => t.id)) + 1 : 1,
+    }
+
+    setTasks([...tasks, newTask])
+    toast({
+      title: "任务已创建",
+      description: `"${newTask.title}" 已添加到您的任务列表`,
+    })
+  }
+
+  const handleQuickAddTask = () => {
+    if (!quickTaskInput.trim()) return
+
+    const newTask: Task = {
+      id: tasks.length > 0 ? Math.max(...tasks.map((t) => t.id)) + 1 : 1,
+      title: quickTaskInput,
+      description: "",
+      priority: "medium",
+      dueDate: new Date().toISOString().split("T")[0],
+      estimatedTime: 30,
+      project: "个人发展",
+      status: "todo",
+      tags: [],
+    }
+
+    setTasks([...tasks, newTask])
+    setQuickTaskInput("")
+    toast({
+      title: "快速任务已添加",
+      description: `"${newTask.title}" 已添加到您的任务列表`,
+    })
+  }
+
   return (
     <div className="flex flex-col p-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">今日仪表盘</h1>
-          <p className="text-muted-foreground">2025年5月17日，星期六</p>
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => setOpen(true)} className="md:hidden">
+            <Menu className="h-5 w-5" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">今日仪表盘</h1>
+            <p className="text-muted-foreground">2025年5月17日，星期六</p>
+          </div>
         </div>
-        <Button className="gap-2">
+        <Button className="gap-2" onClick={handleNewTask}>
           <Plus className="h-4 w-4" />
           <span>新建任务</span>
         </Button>
@@ -165,7 +274,7 @@ export function DashboardView() {
                       cx="50"
                       cy="50"
                       strokeDasharray="289.1"
-                      strokeDashoffset={(1 - timerMinutes / 25) * 289.1}
+                      strokeDashoffset={(1 - (timerMinutes * 60 + timerSeconds) / (25 * 60)) * 289.1}
                     />
                   </svg>
                   <div className="text-3xl font-bold">
@@ -187,7 +296,7 @@ export function DashboardView() {
                       </>
                     )}
                   </Button>
-                  <Button variant="outline" size="sm" className="w-24">
+                  <Button variant="outline" size="sm" className="w-24" onClick={resetTimer}>
                     <Check className="mr-1 h-4 w-4" />
                     完成
                   </Button>
@@ -203,8 +312,17 @@ export function DashboardView() {
             </CardHeader>
             <CardContent>
               <div className="flex gap-2">
-                <Input placeholder="输入新任务..." />
-                <Button size="icon">
+                <Input
+                  placeholder="输入新任务..."
+                  value={quickTaskInput}
+                  onChange={(e) => setQuickTaskInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleQuickAddTask()
+                    }
+                  }}
+                />
+                <Button size="icon" onClick={handleQuickAddTask}>
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
@@ -246,6 +364,9 @@ export function DashboardView() {
           </Card>
         </div>
       </div>
+
+      {/* 任务表单弹窗 */}
+      <TaskFormDialog open={taskDialogOpen} onOpenChange={setTaskDialogOpen} onSave={handleSaveTask} />
     </div>
   )
 }
