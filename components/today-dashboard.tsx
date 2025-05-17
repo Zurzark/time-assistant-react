@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Activity,
   AlertCircle,
@@ -17,6 +17,7 @@ import {
   Play,
   Smile,
   Timer,
+  X,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,10 +28,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils"
 import { PomodoroCard } from "./pomodoro-card"
 import { PomodoroModal } from "./pomodoro-modal"
+import { DueTasksModal } from "./due-tasks-modal"
+import { FrogTaskModal } from "./frog-task-modal"
+import { EditTaskModal } from "./edit-task-modal"
+import { DeleteTaskConfirm } from "./delete-task-confirm"
+import { TaskStatsProvider, useTaskStats } from "./task-stats-updater"
+import { allTasks } from "./mock-tasks"
 
 export function TodayDashboard() {
   const [timeRange, setTimeRange] = useState("today")
   const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false)
+  const [dueTasksModalOpen, setDueTasksModalOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<{ id: string; title: string } | null>(null)
 
   const today = new Date()
@@ -46,75 +54,120 @@ export function TodayDashboard() {
     setPomodoroModalOpen(true)
   }
 
+  const handleViewAllDueTasks = () => {
+    setDueTasksModalOpen(true)
+  }
+
+  // 使用模拟数据初始化任务统计
+  useEffect(() => {
+    // 这里我们可以从API获取数据，暂时使用mock数据
+  }, [])
+
   return (
-    <div className="container py-6 space-y-8">
-      <div className="flex flex-col space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">今日</h1>
-        <p className="text-muted-foreground">{formattedDate} · 早上好，今天将是充满成就的一天！</p>
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <TaskStatsCard timeRange={timeRange} setTimeRange={setTimeRange} />
-        <FrogTasksCard onPomodoroClick={handlePomodoroClick} />
-        <DueTodayCard onPomodoroClick={handlePomodoroClick} />
-      </div>
-
-      <div className="grid gap-6 md:grid-cols-3">
-        <div className="md:col-span-2">
-          <TimelineCard />
+    <TaskStatsProvider>
+      <div className="container py-6 space-y-8">
+        <div className="flex flex-col space-y-2">
+          <h1 className="text-3xl font-bold tracking-tight">今日</h1>
+          <p className="text-muted-foreground">{formattedDate} · 早上好，今天将是充满成就的一天！</p>
         </div>
-        <div className="space-y-6">
-          <PomodoroCard />
-          <AiSuggestionsCard />
-        </div>
-      </div>
 
-      <div className="grid gap-6 md:grid-cols-3">
-        <div className="md:col-span-2">
-          <TodayTasksCard onPomodoroClick={handlePomodoroClick} />
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <TaskStatsCard timeRange={timeRange} setTimeRange={setTimeRange} />
+          <FrogTasksCard onPomodoroClick={handlePomodoroClick} />
+          <DueTodayCard onPomodoroClick={handlePomodoroClick} onViewAll={handleViewAllDueTasks} />
         </div>
-      </div>
 
-      {/* Pomodoro Modal */}
-      <PomodoroModal open={pomodoroModalOpen} onOpenChange={setPomodoroModalOpen} initialTask={selectedTask} />
-    </div>
+        <div className="grid gap-6 md:grid-cols-3">
+          <div className="md:col-span-1 md:row-span-2">
+            <TimelineCard />
+          </div>
+          <div className="md:col-span-2 space-y-6">
+            <div className="grid gap-6 md:grid-cols-2 items-start">
+              <PomodoroCard />
+              <TodayTasksCard onPomodoroClick={handlePomodoroClick} />
+            </div>
+            <AiSuggestionsCard />
+          </div>
+        </div>
+
+        {/* Pomodoro Modal */}
+        <PomodoroModal open={pomodoroModalOpen} onOpenChange={setPomodoroModalOpen} initialTask={selectedTask} />
+        
+        {/* Due Tasks Modal */}
+        <DueTasksModal open={dueTasksModalOpen} onOpenChange={setDueTasksModalOpen} />
+      </div>
+    </TaskStatsProvider>
   )
 }
 
 function TaskStatsCard({ timeRange, setTimeRange }: { timeRange: string; setTimeRange: (value: string) => void }) {
+  const { stats, timeRange: taskTimeRange, setTimeRange: updateTimeRange, addTasks } = useTaskStats()
+  
+  // 初始化任务数据
+  useEffect(() => {
+    // 在组件挂载时加载模拟任务数据
+    addTasks(allTasks)
+  }, [addTasks])
+  
+  // 同步外部时间范围到任务统计上下文
+  useEffect(() => {
+    if (timeRange !== taskTimeRange) {
+      updateTimeRange(timeRange as any)
+    }
+  }, [timeRange, taskTimeRange, updateTimeRange])
+  
+  // 处理时间范围变化
+  const handleTimeRangeChange = (value: string) => {
+    setTimeRange(value)
+    updateTimeRange(value as any)
+  }
+  
+  // 计算完成百分比，避免除以零错误
+  const completionPercentage = stats.total > 0 
+    ? Math.round((stats.completed / stats.total) * 100) 
+    : 0
+  
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-md font-medium">任务统计</CardTitle>
-        <Select value={timeRange} onValueChange={setTimeRange}>
+        <Select value={timeRange} onValueChange={handleTimeRangeChange}>
           <SelectTrigger className="w-[120px] h-8">
             <SelectValue placeholder="时间范围" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="today">今日</SelectItem>
             <SelectItem value="week">本周</SelectItem>
+            <SelectItem value="month">本月</SelectItem>
+            <SelectItem value="all">全部</SelectItem>
           </SelectContent>
         </Select>
       </CardHeader>
       <CardContent className="pb-2">
         <div className="grid grid-cols-3 gap-4">
           <div className="flex flex-col items-center justify-center">
-            <span className="text-3xl font-bold">12</span>
+            <span className="text-3xl font-bold">{stats.total}</span>
             <span className="text-xs text-muted-foreground">总任务数</span>
           </div>
           <div className="flex flex-col items-center justify-center">
-            <span className="text-3xl font-bold text-green-500">5</span>
+            <span className="text-3xl font-bold text-green-500">{stats.completed}</span>
             <span className="text-xs text-muted-foreground">已完成</span>
           </div>
           <div className="flex flex-col items-center justify-center">
-            <span className="text-3xl font-bold text-amber-500">7</span>
+            <span className="text-3xl font-bold text-amber-500">{stats.pending}</span>
             <span className="text-xs text-muted-foreground">待处理</span>
           </div>
         </div>
       </CardContent>
       <CardFooter className="pt-2">
         <div className="w-full bg-muted rounded-full h-2.5">
-          <div className="bg-primary h-2.5 rounded-full" style={{ width: "42%" }}></div>
+          <div 
+            className="bg-primary h-2.5 rounded-full transition-all duration-300 ease-in-out" 
+            style={{ width: `${completionPercentage}%` }}
+          ></div>
+        </div>
+        <div className="w-full text-right text-xs text-muted-foreground mt-1">
+          {completionPercentage}%
         </div>
       </CardFooter>
     </Card>
@@ -122,6 +175,140 @@ function TaskStatsCard({ timeRange, setTimeRange }: { timeRange: string; setTime
 }
 
 function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, taskTitle: string) => void }) {
+  const { updateTaskStats, recalculateStats, addTasks, removeTasks } = useTaskStats()
+
+  // 状态管理
+  const [tasks, setTasks] = useState([
+    { id: "1", title: "完成产品设计方案", completed: false },
+    { id: "2", title: "准备明天的演讲", completed: false },
+    { id: "3", title: "回复重要邮件", completed: true },
+  ])
+  const [frogTaskModalOpen, setFrogTaskModalOpen] = useState(false)
+  const [editTaskModalOpen, setEditTaskModalOpen] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [currentTask, setCurrentTask] = useState<{ id: string; title: string } | null>(null)
+  
+  // 记录是否已初始化，避免重复计算
+  const initializedRef = useRef(false)
+
+  // 初始化任务状态 - 只在组件首次加载时运行一次
+  useEffect(() => {
+    if (!initializedRef.current) {
+      // 将青蛙任务添加到任务统计中，设置今天为默认截止日期
+      const frogTasksWithDates = tasks.map(task => ({
+        ...task,
+        id: task.id,
+        title: task.title,
+        completed: task.completed,
+        isFrog: true,
+        // 将其截止日期设置为今天，确保它们被计入今日任务
+        dueDate: new Date().toISOString().split('T')[0]
+      }))
+      
+      // 添加到任务统计
+      addTasks(frogTasksWithDates)
+      initializedRef.current = true
+    }
+  }, [addTasks, tasks]) // 依赖于addTasks和初始tasks
+
+  // 处理复选框点击 - 更新任务状态和统计数据
+  const handleCheckboxChange = (taskId: string) => {
+    setTasks(prev => {
+      const newTasks = prev.map(task => {
+        if (task.id === taskId) {
+          const newCompleted = !task.completed
+          
+          // 更新任务统计 - 通过完整的任务对象
+          const updatedTask = {
+            id: taskId,
+            title: task.title,
+            completed: newCompleted,
+            isFrog: true,
+            dueDate: new Date().toISOString().split('T')[0] // 确保它在今日统计中
+          }
+          
+          // 更新任务统计
+          addTasks([updatedTask])
+          
+          return { ...task, completed: newCompleted }
+        }
+        return task
+      })
+      return newTasks
+    })
+  }
+
+  // 处理编辑任务
+  const handleEditTask = (taskId: string, taskTitle: string) => {
+    setCurrentTask({ id: taskId, title: taskTitle })
+    setEditTaskModalOpen(true)
+  }
+
+  // 处理添加到时间轴
+  const handleAddToTimeline = (taskId: string) => {
+    // 这里应实现将任务添加到时间轴的逻辑
+    console.log(`将任务 ${taskId} 添加到时间轴`)
+    // 简化实现：仅显示一个提示
+    alert(`任务已添加到时间轴`)
+  }
+
+  // 处理删除任务 - 同步更新任务统计
+  const handleDeleteTask = (taskId: string, taskTitle: string) => {
+    setCurrentTask({ id: taskId, title: taskTitle })
+    setDeleteConfirmOpen(true)
+  }
+
+  // 确认删除任务 - 从任务统计中移除
+  const confirmDeleteTask = () => {
+    if (currentTask) {
+      // 从任务统计中移除
+      removeTasks([currentTask.id])
+      
+      // 从UI中移除
+      setTasks(prev => prev.filter(task => task.id !== currentTask.id))
+    }
+  }
+
+  // 保存编辑后的任务 - 更新任务统计
+  const saveEditedTask = (editedTask: any) => {
+    // 更新本地任务列表
+    setTasks(prev => {
+      const newTasks = prev.map(task => 
+        task.id === editedTask.id ? { ...task, title: editedTask.title } : task
+      )
+      return newTasks
+    })
+    
+    // 查找被编辑的任务的完整信息
+    const task = tasks.find(t => t.id === editedTask.id)
+    if (task) {
+      // 更新任务统计
+      const updatedTask = {
+        ...task,
+        title: editedTask.title,
+        isFrog: true,
+        dueDate: editedTask.dueDate || new Date().toISOString().split('T')[0]
+      }
+      
+      // 更新任务统计
+      addTasks([updatedTask])
+    }
+  }
+
+  // 添加新的青蛙任务 - 现在由FrogTaskModal内部处理统计更新
+  const addFrogTasks = (taskIds: string[]) => {
+    // 在实际应用中，这里应从状态管理系统获取完整任务信息
+    // 简化实现：创建模拟任务
+    const newTasks = taskIds.map(id => ({
+      id,
+      title: id.startsWith('new-') ? id.substring(4) : `新任务 ${id}`,
+      completed: false
+    }))
+    
+    // 更新UI
+    setTasks(prev => [...prev, ...newTasks])
+  }
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -130,17 +317,21 @@ function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, 
       </CardHeader>
       <CardContent className="pb-2">
         <div className="space-y-4">
-          {[
-            { id: "1", title: "完成产品设计方案", completed: false },
-            { id: "2", title: "准备明天的演讲", completed: false },
-            { id: "3", title: "回复重要邮件", completed: true },
-          ].map((task) => (
-            <div key={task.id} className="flex items-center space-x-2">
-              <Checkbox id={`frog-${task.id}`} checked={task.completed} />
+          {tasks.map((task) => (
+            <div 
+              key={task.id} 
+              className="flex items-center space-x-2 group transition-all duration-200"
+            >
+              <Checkbox 
+                id={`frog-${task.id}`} 
+                checked={task.completed}
+                onCheckedChange={() => handleCheckboxChange(task.id)}
+                className="transition-all duration-200"
+              />
               <label
                 htmlFor={`frog-${task.id}`}
                 className={cn(
-                  "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1",
+                  "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1 cursor-pointer transition-all duration-200",
                   task.completed && "line-through text-muted-foreground",
                 )}
               >
@@ -149,21 +340,34 @@ function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, 
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={() => onPomodoroClick(task.id, task.title)}
               >
                 <Timer className="h-4 w-4" />
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
                     <MoreHorizontal className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem>编辑</DropdownMenuItem>
-                  <DropdownMenuItem>添加到时间轴</DropdownMenuItem>
-                  <DropdownMenuItem>删除</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleEditTask(task.id, task.title)}>
+                    编辑
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleAddToTimeline(task.id)}>
+                    添加到时间轴
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    className="text-red-500"
+                    onClick={() => handleDeleteTask(task.id, task.title)}
+                  >
+                    删除
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -171,15 +375,43 @@ function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, 
         </div>
       </CardContent>
       <CardFooter className="pt-2">
-        <Button variant="outline" size="sm" className="w-full">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="w-full"
+          onClick={() => setFrogTaskModalOpen(true)}  
+        >
           添加青蛙任务
         </Button>
       </CardFooter>
+
+      {/* 青蛙任务模态框 */}
+      <FrogTaskModal 
+        open={frogTaskModalOpen}
+        onOpenChange={setFrogTaskModalOpen}
+        onAddFrogTasks={addFrogTasks}
+      />
+      
+      {/* 编辑任务模态框 */}
+      <EditTaskModal
+        open={editTaskModalOpen}
+        onOpenChange={setEditTaskModalOpen}
+        task={currentTask}
+        onSave={saveEditedTask}
+      />
+      
+      {/* 删除确认对话框 */}
+      <DeleteTaskConfirm
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        taskTitle={currentTask?.title || ""}
+        onConfirm={confirmDeleteTask}
+      />
     </Card>
   )
 }
 
-function DueTodayCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, taskTitle: string) => void }) {
+function DueTodayCard({ onPomodoroClick, onViewAll }: { onPomodoroClick: (taskId: string, taskTitle: string) => void, onViewAll: () => void }) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -251,7 +483,7 @@ function DueTodayCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, t
         </div>
       </CardContent>
       <CardFooter className="pt-2">
-        <Button variant="outline" size="sm" className="w-full">
+        <Button variant="outline" size="sm" className="w-full" onClick={onViewAll}>
           查看全部到期任务
         </Button>
       </CardFooter>

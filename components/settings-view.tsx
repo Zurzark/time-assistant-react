@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -14,11 +15,55 @@ import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { Bell, Brain, Clock, Download, Globe, Moon, Settings, Sun, Tag, Timer, User } from "lucide-react"
 import { TimeField } from "@/components/ui/time-field"
-import type { TimeValue } from "@internationalized/date"
+import { Time } from "@internationalized/date"
+
+// 定义标签颜色的类型
+type TagColors = Record<string, string>;
+
+// 将16进制颜色转换为HSL格式
+function hexToHSL(hex: string): string {
+  // 去掉可能的 # 前缀
+  hex = hex.replace(/^#/, '');
+  
+  // 将颜色转换为RGB
+  let r = parseInt(hex.substring(0, 2), 16) / 255;
+  let g = parseInt(hex.substring(2, 4), 16) / 255;
+  let b = parseInt(hex.substring(4, 6), 16) / 255;
+  
+  // 找到最大和最小RGB值
+  let max = Math.max(r, g, b);
+  let min = Math.min(r, g, b);
+  
+  // 计算亮度
+  let l = (max + min) / 2;
+  
+  let h = 0;
+  let s = 0;
+  
+  if (max !== min) {
+    // 计算饱和度
+    s = l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min);
+    
+    // 计算色相
+    if (max === r) {
+      h = (g - b) / (max - min) + (g < b ? 6 : 0);
+    } else if (max === g) {
+      h = (b - r) / (max - min) + 2;
+    } else {
+      h = (r - g) / (max - min) + 4;
+    }
+    
+    h *= 60;
+  }
+  
+  // 返回HSL格式
+  return `${Math.round(h)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
+}
 
 export function SettingsView() {
+  const { theme, setTheme, resolvedTheme } = useTheme()
   const [activeTab, setActiveTab] = useState("account")
-  const [theme, setTheme] = useState("light")
+  const [themeColor, setThemeColor] = useState("#0ea5e9")
   const [workDuration, setWorkDuration] = useState(25)
   const [shortBreakDuration, setShortBreakDuration] = useState(5)
   const [longBreakDuration, setLongBreakDuration] = useState(15)
@@ -28,15 +73,56 @@ export function SettingsView() {
   const [browserNotifications, setBrowserNotifications] = useState(true)
   const [soundNotifications, setSoundNotifications] = useState(true)
   const [workDays, setWorkDays] = useState<string[]>(["monday", "tuesday", "wednesday", "thursday", "friday"])
-  const [workStartTime, setWorkStartTime] = useState<TimeValue>({ hour: 9, minute: 0 })
-  const [workEndTime, setWorkEndTime] = useState<TimeValue>({ hour: 18, minute: 0 })
-  const [tagColors, setTagColors] = useState({
+  const [workStartTime, setWorkStartTime] = useState<{ hour: number; minute: number }>({ hour: 9, minute: 0 })
+  const [workEndTime, setWorkEndTime] = useState<{ hour: number; minute: number }>({ hour: 18, minute: 0 })
+  const [tagColors, setTagColors] = useState<TagColors>({
     工作: "#ef4444",
     学习: "#3b82f6",
     个人: "#10b981",
     家庭: "#f59e0b",
     健康: "#8b5cf6",
   })
+
+  // 预定义主题颜色
+  const predefinedColors = [
+    { name: "蓝色", value: "#0ea5e9" },
+    { name: "紫色", value: "#8b5cf6" },
+    { name: "绿色", value: "#10b981" },
+    { name: "红色", value: "#ef4444" },
+    { name: "橙色", value: "#f59e0b" },
+    { name: "粉色", value: "#ec4899" },
+    { name: "灰色", value: "#6b7280" }
+  ]
+
+  // 初始化从本地存储加载主题颜色
+  useEffect(() => {
+    const savedThemeColor = localStorage.getItem('themeColor')
+    if (savedThemeColor) {
+      setThemeColor(savedThemeColor)
+      
+      // 更新CSS变量
+      document.documentElement.style.setProperty('--theme-primary', savedThemeColor)
+      
+      // 转换为HSL并更新CSS变量
+      const hslColor = hexToHSL(savedThemeColor)
+      document.documentElement.style.setProperty('--primary', hslColor)
+      document.documentElement.style.setProperty('--primary-hsl', hslColor)
+    }
+  }, [])
+
+  // 当主题颜色变化时更新CSS变量和本地存储
+  useEffect(() => {
+    // 设置主题颜色
+    document.documentElement.style.setProperty('--theme-primary', themeColor)
+    
+    // 转换为HSL并更新Tailwind使用的CSS变量
+    const hslColor = hexToHSL(themeColor)
+    document.documentElement.style.setProperty('--primary', hslColor)
+    document.documentElement.style.setProperty('--primary-hsl', hslColor)
+    
+    // 保存到本地存储
+    localStorage.setItem('themeColor', themeColor)
+  }, [themeColor])
 
   const handleWorkDayToggle = (day: string) => {
     if (workDays.includes(day)) {
@@ -67,6 +153,10 @@ export function SettingsView() {
         [newTag]: "#64748b", // Default color
       })
     }
+  }
+
+  const handleThemeColorChange = (color: string) => {
+    setThemeColor(color)
   }
 
   return (
@@ -239,28 +329,51 @@ export function SettingsView() {
                     <h3 className="text-lg font-medium">主题设置</h3>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <Sun className="h-4 w-4" />
+                        <Sun className={cn("h-5 w-5", resolvedTheme === "light" ? "text-amber-500" : "text-muted-foreground")} />
                         <Label htmlFor="theme-toggle">深色模式</Label>
-                        <Moon className="h-4 w-4" />
+                        <Moon className={cn("h-5 w-5", resolvedTheme === "dark" ? "text-blue-500" : "text-muted-foreground")} />
                       </div>
                       <Switch
                         id="theme-toggle"
-                        checked={theme === "dark"}
+                        checked={resolvedTheme === "dark"}
                         onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
                       />
                     </div>
 
                     <div className="grid gap-2">
                       <Label htmlFor="theme-color">主题颜色</Label>
-                      <div className="flex items-center space-x-2">
-                        <input
-                          type="color"
-                          id="theme-color"
-                          defaultValue="#0ea5e9"
-                          className="w-10 h-10 rounded-md border cursor-pointer"
-                        />
-                        <span className="text-sm text-muted-foreground">选择应用程序的主色调</span>
+                      <div className="flex flex-wrap gap-3 mt-2">
+                        {predefinedColors.map((color) => (
+                          <button
+                            key={color.value}
+                            type="button"
+                            className={cn(
+                              "w-8 h-8 rounded-full transition-all",
+                              themeColor === color.value ? "ring-2 ring-offset-2 ring-offset-background" : "hover:scale-110"
+                            )}
+                            style={{ backgroundColor: color.value }}
+                            onClick={() => handleThemeColorChange(color.value)}
+                            title={color.name}
+                          />
+                        ))}
+                        <div className="relative">
+                          <input
+                            type="color"
+                            id="custom-color"
+                            value={themeColor}
+                            onChange={(e) => handleThemeColorChange(e.target.value)}
+                            className="sr-only"
+                          />
+                          <label 
+                            htmlFor="custom-color" 
+                            className="block w-8 h-8 rounded-full border-2 border-dashed border-muted-foreground flex items-center justify-center cursor-pointer hover:scale-110 transition-all"
+                            title="自定义颜色"
+                          >
+                            <span className="text-xl">+</span>
+                          </label>
+                        </div>
                       </div>
+                      <p className="text-sm text-muted-foreground mt-1">选择应用程序的主色调</p>
                     </div>
                   </div>
 
