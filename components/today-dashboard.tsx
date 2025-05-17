@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import {
   Activity,
   AlertCircle,
@@ -18,12 +18,14 @@ import {
   Smile,
   Timer,
   X,
+  Edit,
+  Trash2,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { PomodoroCard } from "./pomodoro-card"
@@ -33,7 +35,7 @@ import { FrogTaskModal } from "./frog-task-modal"
 import { EditTaskModal } from "./edit-task-modal"
 import { DeleteTaskConfirm } from "./delete-task-confirm"
 import { TaskStatsProvider, useTaskStats } from "./task-stats-updater"
-import { allTasks } from "./mock-tasks"
+import DatabaseInitializer from "./database-initializer"
 
 export function TodayDashboard() {
   const [timeRange, setTimeRange] = useState("today")
@@ -58,13 +60,11 @@ export function TodayDashboard() {
     setDueTasksModalOpen(true)
   }
 
-  // 使用模拟数据初始化任务统计
-  useEffect(() => {
-    // 这里我们可以从API获取数据，暂时使用mock数据
-  }, [])
-
   return (
     <TaskStatsProvider>
+      {/* 确保在应用启动时初始化数据库 */}
+      <DatabaseInitializer />
+      
       <div className="container py-6 space-y-8">
         <div className="flex flex-col space-y-2">
           <h1 className="text-3xl font-bold tracking-tight">今日</h1>
@@ -78,15 +78,12 @@ export function TodayDashboard() {
         </div>
 
         <div className="grid gap-6 md:grid-cols-3">
-          <div className="md:col-span-1 md:row-span-2">
+          <div className="md:col-span-2">
             <TimelineCard />
           </div>
-          <div className="md:col-span-2 space-y-6">
-            <div className="grid gap-6 md:grid-cols-2 items-start">
+          <div className="space-y-6">
               <PomodoroCard />
               <TodayTasksCard onPomodoroClick={handlePomodoroClick} />
-            </div>
-            <AiSuggestionsCard />
           </div>
         </div>
 
@@ -101,31 +98,25 @@ export function TodayDashboard() {
 }
 
 function TaskStatsCard({ timeRange, setTimeRange }: { timeRange: string; setTimeRange: (value: string) => void }) {
-  const { stats, timeRange: taskTimeRange, setTimeRange: updateTimeRange, addTasks } = useTaskStats()
-  
-  // 初始化任务数据
-  useEffect(() => {
-    // 在组件挂载时加载模拟任务数据
-    addTasks(allTasks)
-  }, [addTasks])
+  const { stats, timeRange: taskTimeRange, setTimeRange: updateTimeRange } = useTaskStats();
   
   // 同步外部时间范围到任务统计上下文
   useEffect(() => {
     if (timeRange !== taskTimeRange) {
-      updateTimeRange(timeRange as any)
+      updateTimeRange(timeRange as any);
     }
-  }, [timeRange, taskTimeRange, updateTimeRange])
+  }, [timeRange, taskTimeRange, updateTimeRange]);
   
   // 处理时间范围变化
   const handleTimeRangeChange = (value: string) => {
-    setTimeRange(value)
-    updateTimeRange(value as any)
-  }
+    setTimeRange(value);
+    updateTimeRange(value as any);
+  };
   
   // 计算完成百分比，避免除以零错误
   const completionPercentage = stats.total > 0 
     ? Math.round((stats.completed / stats.total) * 100) 
-    : 0
+    : 0;
   
   return (
     <Card>
@@ -171,142 +162,169 @@ function TaskStatsCard({ timeRange, setTimeRange }: { timeRange: string; setTime
         </div>
       </CardFooter>
     </Card>
-  )
+  );
 }
 
 function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, taskTitle: string) => void }) {
-  const { updateTaskStats, recalculateStats, addTasks, removeTasks } = useTaskStats()
+  const { updateTaskStats, addTasks, removeTasks } = useTaskStats()
 
   // 状态管理
-  const [tasks, setTasks] = useState([
-    { id: "1", title: "完成产品设计方案", completed: false },
-    { id: "2", title: "准备明天的演讲", completed: false },
-    { id: "3", title: "回复重要邮件", completed: true },
-  ])
+  const [tasks, setTasks] = useState<Array<{id: string | number, title: string, completed: boolean}>>([])
+  const [loading, setLoading] = useState(true)
   const [frogTaskModalOpen, setFrogTaskModalOpen] = useState(false)
   const [editTaskModalOpen, setEditTaskModalOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [currentTask, setCurrentTask] = useState<{ id: string; title: string } | null>(null)
   
-  // 记录是否已初始化，避免重复计算
-  const initializedRef = useRef(false)
-
-  // 初始化任务状态 - 只在组件首次加载时运行一次
-  useEffect(() => {
-    if (!initializedRef.current) {
-      // 将青蛙任务添加到任务统计中，设置今天为默认截止日期
-      const frogTasksWithDates = tasks.map(task => ({
-        ...task,
-        id: task.id,
-        title: task.title,
-        completed: task.completed,
-        isFrog: true,
-        // 将其截止日期设置为今天，确保它们被计入今日任务
-        dueDate: new Date().toISOString().split('T')[0]
-      }))
+  // 从 IndexedDB 加载青蛙任务
+  const loadFrogTasks = useCallback(async () => {
+    try {
+      setLoading(true)
       
-      // 添加到任务统计
-      addTasks(frogTasksWithDates)
-      initializedRef.current = true
+      // 从 IndexedDB 获取所有青蛙任务
+      const { getByIndex, ObjectStores } = await import('@/lib/db')
+      const frogTasks = await getByIndex(
+        ObjectStores.TASKS,
+        'byIsFrog',
+        1  // 使用数字 1 代替布尔值 true
+      )
+      
+      // 过滤出未删除的任务
+      const activeFrogTasks = frogTasks.filter(
+        (task: any) => !task.isDeleted && task.isFrog
+      )
+      
+      // 更新状态
+      setTasks(
+        activeFrogTasks.map((task: any) => ({
+          id: task.id,
+          title: task.title,
+          completed: task.completed
+        }))
+      )
+      
+    } catch (error) {
+      console.error('加载青蛙任务时出错:', error)
+    } finally {
+      setLoading(false)
     }
-  }, [addTasks, tasks]) // 依赖于addTasks和初始tasks
+  }, [])
+  
+  // 在组件挂载时加载青蛙任务
+  useEffect(() => {
+    loadFrogTasks()
+  }, [loadFrogTasks])
 
-  // 处理复选框点击 - 更新任务状态和统计数据
-  const handleCheckboxChange = (taskId: string) => {
-    setTasks(prev => {
-      const newTasks = prev.map(task => {
-        if (task.id === taskId) {
-          const newCompleted = !task.completed
-          
-          // 更新任务统计 - 通过完整的任务对象
-          const updatedTask = {
-            id: taskId,
-            title: task.title,
-            completed: newCompleted,
-            isFrog: true,
-            dueDate: new Date().toISOString().split('T')[0] // 确保它在今日统计中
-          }
-          
-          // 更新任务统计
-          addTasks([updatedTask])
-          
-          return { ...task, completed: newCompleted }
-        }
-        return task
-      })
-      return newTasks
-    })
+  // 处理复选框点击 - 直接更新 IndexedDB
+  const handleCheckboxChange = async (taskId: string | number) => {
+    try {
+      // 在本地状态中找到任务
+      const task = tasks.find(t => t.id == taskId)
+      if (!task) return
+      
+      const newCompleted = !task.completed
+      
+      // 先更新本地状态，使 UI 立即响应
+      setTasks(prev => 
+        prev.map(t => t.id == taskId 
+          ? { ...t, completed: newCompleted } 
+          : t
+        )
+      )
+      
+      // 更新任务统计和 IndexedDB
+      updateTaskStats(taskId, newCompleted)
+    } catch (error) {
+      console.error('更新任务状态时出错:', error)
+      // 出错时恢复本地状态
+      setTasks(prev => [...prev])
+    }
   }
 
   // 处理编辑任务
-  const handleEditTask = (taskId: string, taskTitle: string) => {
-    setCurrentTask({ id: taskId, title: taskTitle })
+  const handleEditTask = (taskId: string | number, taskTitle: string) => {
+    setCurrentTask({ id: String(taskId), title: taskTitle })
     setEditTaskModalOpen(true)
   }
 
   // 处理添加到时间轴
-  const handleAddToTimeline = (taskId: string) => {
+  const handleAddToTimeline = (taskId: string | number) => {
     // 这里应实现将任务添加到时间轴的逻辑
     console.log(`将任务 ${taskId} 添加到时间轴`)
-    // 简化实现：仅显示一个提示
-    alert(`任务已添加到时间轴`)
   }
 
-  // 处理删除任务 - 同步更新任务统计
-  const handleDeleteTask = (taskId: string, taskTitle: string) => {
-    setCurrentTask({ id: taskId, title: taskTitle })
+  // 处理删除任务
+  const handleDeleteTask = (taskId: string | number, taskTitle: string) => {
+    setCurrentTask({ id: String(taskId), title: taskTitle })
     setDeleteConfirmOpen(true)
   }
 
-  // 确认删除任务 - 从任务统计中移除
+  // 确认删除任务
   const confirmDeleteTask = () => {
     if (currentTask) {
-      // 从任务统计中移除
+      // 在 IndexedDB 中标记为删除
       removeTasks([currentTask.id])
       
-      // 从UI中移除
-      setTasks(prev => prev.filter(task => task.id !== currentTask.id))
+      // 从本地状态中移除
+      setTasks(prev => prev.filter(task => task.id != currentTask.id))
+      
+      setDeleteConfirmOpen(false)
+      setCurrentTask(null)
     }
   }
 
-  // 保存编辑后的任务 - 更新任务统计
-  const saveEditedTask = (editedTask: any) => {
-    // 更新本地任务列表
-    setTasks(prev => {
-      const newTasks = prev.map(task => 
-        task.id === editedTask.id ? { ...task, title: editedTask.title } : task
-      )
-      return newTasks
-    })
-    
-    // 查找被编辑的任务的完整信息
-    const task = tasks.find(t => t.id === editedTask.id)
-    if (task) {
-      // 更新任务统计
-      const updatedTask = {
-        ...task,
+  // 保存编辑后的任务 - 更新到 IndexedDB
+  const saveEditedTask = async (editedTask: any) => {
+    try {
+      // 找到原始任务以保留其完成状态
+      const originalTask = tasks.find(t => t.id == editedTask.id);
+      const completed = originalTask ? originalTask.completed : false;
+      
+      // 准备更新到 IndexedDB 的任务对象
+      const updatedTaskData = {
+        id: editedTask.id,
         title: editedTask.title,
+        completed: completed, // 保留原始完成状态
         isFrog: true,
-        dueDate: editedTask.dueDate || new Date().toISOString().split('T')[0]
+        dueDate: editedTask.dueDate || new Date()
       }
       
-      // 更新任务统计
-      addTasks([updatedTask])
+      // 更新任务到 IndexedDB
+      await addTasks([updatedTaskData])
+      
+      // 重新加载任务以获取最新数据
+      await loadFrogTasks()
+      
+      setEditTaskModalOpen(false)
+      setCurrentTask(null)
+    } catch (error) {
+      console.error('保存编辑任务时出错:', error)
     }
   }
-
-  // 添加新的青蛙任务 - 现在由FrogTaskModal内部处理统计更新
-  const addFrogTasks = (taskIds: string[]) => {
-    // 在实际应用中，这里应从状态管理系统获取完整任务信息
-    // 简化实现：创建模拟任务
-    const newTasks = taskIds.map(id => ({
-      id,
-      title: id.startsWith('new-') ? id.substring(4) : `新任务 ${id}`,
-      completed: false
-    }))
-    
-    // 更新UI
-    setTasks(prev => [...prev, ...newTasks])
+  
+  // 添加新的青蛙任务 - 保存到 IndexedDB
+  const addFrogTasks = async (taskIds: string[]) => {
+    try {
+      // 如果是创建的新任务，直接添加到本地状态
+      const newLocalTasks = taskIds
+        .filter(id => id.startsWith('new-'))
+        .map(id => ({
+          id,
+          title: id.substring(4),
+          completed: false,
+          isFrog: true
+        }))
+      
+      if (newLocalTasks.length > 0) {
+        // 添加到 IndexedDB
+        await addTasks(newLocalTasks)
+      }
+      
+      // 重新加载任务以获取最新数据
+      await loadFrogTasks()
+    } catch (error) {
+      console.error('添加或加载青蛙任务时出错:', error)
+    }
   }
 
   return (
@@ -316,63 +334,77 @@ function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, 
         <CardDescription>最重要但可能最难开始的任务</CardDescription>
       </CardHeader>
       <CardContent className="pb-2">
-        <div className="space-y-4">
-          {tasks.map((task) => (
-            <div 
-              key={task.id} 
-              className="flex items-center space-x-2 group transition-all duration-200"
-            >
-              <Checkbox 
-                id={`frog-${task.id}`} 
-                checked={task.completed}
-                onCheckedChange={() => handleCheckboxChange(task.id)}
-                className="transition-all duration-200"
-              />
-              <label
-                htmlFor={`frog-${task.id}`}
-                className={cn(
-                  "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1 cursor-pointer transition-all duration-200",
-                  task.completed && "line-through text-muted-foreground",
-                )}
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : tasks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <Frown className="h-8 w-8 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">您还没有设置青蛙任务</p>
+            <Button variant="link" size="sm" onClick={() => setFrogTaskModalOpen(true)}>
+              立即添加
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {tasks.map((task) => (
+              <div 
+                key={task.id} 
+                className="flex items-center space-x-2 group transition-all duration-200"
               >
-                🐸 {task.title}
-              </label>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={() => onPomodoroClick(task.id, task.title)}
-              >
-                <Timer className="h-4 w-4" />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleEditTask(task.id, task.title)}>
-                    编辑
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleAddToTimeline(task.id)}>
-                    添加到时间轴
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className="text-red-500"
-                    onClick={() => handleDeleteTask(task.id, task.title)}
-                  >
-                    删除
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ))}
-        </div>
+                <Checkbox 
+                  id={`frog-${task.id}`} 
+                  checked={task.completed}
+                  onCheckedChange={() => handleCheckboxChange(task.id)}
+                  className="transition-all duration-200"
+                />
+                <label
+                  htmlFor={`frog-${task.id}`}
+                  className={cn(
+                    "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1 cursor-pointer transition-all duration-200",
+                    task.completed && "line-through text-muted-foreground",
+                  )}
+                >
+                  🐸 {task.title}
+                </label>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={() => onPomodoroClick(String(task.id), task.title)}
+                >
+                  <Timer className="h-4 w-4" />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleEditTask(task.id, task.title)}>
+                      编辑
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAddToTimeline(task.id)}>
+                      添加到时间轴
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className="text-red-500"
+                      onClick={() => handleDeleteTask(task.id, task.title)}
+                    >
+                      删除
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
       <CardFooter className="pt-2">
         <Button 
@@ -386,7 +418,7 @@ function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, 
       </CardFooter>
 
       {/* 青蛙任务模态框 */}
-      <FrogTaskModal 
+      <FrogTaskModal
         open={frogTaskModalOpen}
         onOpenChange={setFrogTaskModalOpen}
         onAddFrogTasks={addFrogTasks}
@@ -412,6 +444,124 @@ function FrogTasksCard({ onPomodoroClick }: { onPomodoroClick: (taskId: string, 
 }
 
 function DueTodayCard({ onPomodoroClick, onViewAll }: { onPomodoroClick: (taskId: string, taskTitle: string) => void, onViewAll: () => void }) {
+  const { updateTaskStats } = useTaskStats();
+  
+  // 状态管理
+  const [tasks, setTasks] = useState<Array<{
+    id: string | number, 
+    title: string, 
+    completed: boolean, 
+    priority?: string,
+    time?: string
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // 从 IndexedDB 加载今日到期任务
+  const loadDueTasks = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      // 获取今日日期（不含时间）
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      
+      // 从 IndexedDB 获取今日到期任务
+      const { getAll, ObjectStores } = await import('@/lib/db');
+      const allTasks = await getAll(ObjectStores.TASKS);
+      
+      // 过滤出未删除的今日到期任务
+      const dueTasks = allTasks.filter((task: any) => {
+        // 检查任务是否未被删除
+        if (task.isDeleted) return false;
+        
+        // 如果有截止日期，检查是否在今天
+        if (task.dueDate) {
+          const dueDate = new Date(task.dueDate);
+          dueDate.setHours(0, 0, 0, 0);
+          return dueDate >= today && dueDate < tomorrow;
+        }
+        
+        return false;
+      });
+      
+      // 转换优先级格式，并按优先级排序
+      const mappedTasks = dueTasks.map((task: any) => {
+        // 将数据库中的优先级映射为显示格式
+        let priority = 'medium';
+        if (task.priority === 'importantUrgent') {
+          priority = 'high';
+        } else if (task.priority === 'importantNotUrgent') {
+          priority = 'medium';
+        } else if (task.priority === 'notImportantNotUrgent') {
+          priority = 'low';
+        }
+        
+        // 格式化时间（如果有）
+        let timeStr = '';
+        if (task.dueDate) {
+          const dueDate = new Date(task.dueDate);
+          timeStr = dueDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        
+        return {
+          id: task.id,
+          title: task.title,
+          completed: task.completed,
+          priority,
+          time: timeStr
+        };
+      });
+      
+      // 更新状态
+      setTasks(mappedTasks);
+      
+    } catch (error) {
+      console.error('加载到期任务时出错:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  
+  // 初始加载任务
+  useEffect(() => {
+    loadDueTasks();
+  }, [loadDueTasks]);
+  
+  // 处理复选框点击 - 更新任务完成状态
+  const handleCheckboxChange = async (taskId: string | number) => {
+    // 在本地状态中找到任务
+    const task = tasks.find(t => t.id == taskId);
+    if (!task) return;
+    
+    const newCompleted = !task.completed;
+    
+    // 先更新本地状态，使 UI 立即响应
+    setTasks(prev => 
+      prev.map(t => t.id == taskId 
+        ? { ...t, completed: newCompleted } 
+        : t
+      )
+    );
+    
+    try {
+      // 更新 IndexedDB
+      await updateTaskStats(taskId, newCompleted);
+    } catch (error) {
+      console.error('更新任务状态时出错:', error);
+      
+      // 发生错误时回滚 UI 状态
+      setTasks(prev => 
+        prev.map(t => t.id == taskId 
+          ? { ...t, completed: task.completed } 
+          : t
+        )
+      );
+    }
+  };
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -419,68 +569,81 @@ function DueTodayCard({ onPomodoroClick, onViewAll }: { onPomodoroClick: (taskId
         <CardDescription>需要今天完成的任务</CardDescription>
       </CardHeader>
       <CardContent className="pb-2">
-        <div className="space-y-4">
-          {[
-            { id: "4", title: "提交周报", priority: "high", time: "17:00", completed: false },
-            { id: "5", title: "客户电话会议", priority: "medium", time: "14:30", completed: false },
-            { id: "6", title: "更新项目文档", priority: "low", time: "12:00", completed: true },
-          ].map((task) => (
-            <div key={task.id} className="flex items-center space-x-2">
-              <Checkbox id={`due-${task.id}`} checked={task.completed} />
-              <div className="flex-1">
-                <label
-                  htmlFor={`due-${task.id}`}
-                  className={cn(
-                    "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1",
-                    task.completed && "line-through text-muted-foreground",
-                  )}
-                >
-                  {task.title}
-                </label>
-                <div className="flex items-center mt-1">
-                  <Badge
-                    variant="outline"
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : tasks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
+            <p className="text-sm text-muted-foreground">今天没有到期的任务</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {tasks.map((task) => (
+              <div key={task.id} className="flex items-center space-x-2">
+                <Checkbox 
+                  id={`due-${task.id}`} 
+                  checked={task.completed} 
+                  onCheckedChange={() => handleCheckboxChange(task.id)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor={`due-${task.id}`}
                     className={cn(
-                      "text-xs mr-2",
-                      task.priority === "high"
-                        ? "border-red-500 text-red-500"
-                        : task.priority === "medium"
-                          ? "border-amber-500 text-amber-500"
-                          : "border-green-500 text-green-500",
+                      "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 flex-1",
+                      task.completed && "line-through text-muted-foreground",
                     )}
                   >
-                    {task.priority === "high" ? "紧急" : task.priority === "medium" ? "中等" : "低优先级"}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground flex items-center">
-                    <Clock className="h-3 w-3 mr-1" />
-                    {task.time}
-                  </span>
+                    {task.title}
+                  </label>
+                  <div className="flex items-center mt-1">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-xs mr-2",
+                        task.priority === "high"
+                          ? "border-red-500 text-red-500"
+                          : task.priority === "medium"
+                            ? "border-amber-500 text-amber-500"
+                            : "border-green-500 text-green-500",
+                      )}
+                    >
+                      {task.priority === "high" ? "紧急" : task.priority === "medium" ? "中等" : "低优先级"}
+                    </Badge>
+                    {task.time && (
+                      <span className="text-xs text-muted-foreground flex items-center">
+                        <Clock className="h-3 w-3 mr-1" />
+                        {task.time}
+                      </span>
+                    )}
+                  </div>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => onPomodoroClick(String(task.id), task.title)}
+                >
+                  <Timer className="h-4 w-4" />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem>编辑</DropdownMenuItem>
+                    <DropdownMenuItem>添加到时间轴</DropdownMenuItem>
+                    <DropdownMenuItem>推迟</DropdownMenuItem>
+                    <DropdownMenuItem>删除</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => onPomodoroClick(task.id, task.title)}
-              >
-                <Timer className="h-4 w-4" />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem>编辑</DropdownMenuItem>
-                  <DropdownMenuItem>添加到时间轴</DropdownMenuItem>
-                  <DropdownMenuItem>推迟</DropdownMenuItem>
-                  <DropdownMenuItem>删除</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </CardContent>
       <CardFooter className="pt-2">
         <Button variant="outline" size="sm" className="w-full" onClick={onViewAll}>
@@ -488,7 +651,7 @@ function DueTodayCard({ onPomodoroClick, onViewAll }: { onPomodoroClick: (taskId
         </Button>
       </CardFooter>
     </Card>
-  )
+  );
 }
 
 function TimelineCard() {

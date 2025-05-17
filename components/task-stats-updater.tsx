@@ -1,6 +1,7 @@
 "use client"
 
 import React, { createContext, useState, useContext, useEffect, useRef, useCallback } from "react"
+import { ObjectStores, Task as DBTask, add, update, getByIndex, getAll, get, remove } from "@/lib/db"
 
 interface TaskStats {
   total: number
@@ -9,7 +10,7 @@ interface TaskStats {
 }
 
 interface Task {
-  id: string
+  id?: number | string
   title: string
   completed: boolean
   dueDate?: string | Date
@@ -23,10 +24,10 @@ interface TaskStatsContextType {
   stats: TaskStats
   timeRange: TimeRange
   setTimeRange: (range: TimeRange) => void
-  updateTaskStats: (taskId: string, completed: boolean, isNew?: boolean, isRemoved?: boolean) => void
+  updateTaskStats: (taskId: string | number, completed: boolean, isNew?: boolean, isRemoved?: boolean) => void
   recalculateStats: (tasks: Task[]) => void
   addTasks: (tasks: Task[]) => void
-  removeTasks: (taskIds: string[]) => void
+  removeTasks: (taskIds: (string | number)[]) => void
 }
 
 const defaultStats: TaskStats = {
@@ -48,6 +49,7 @@ const TaskStatsContext = createContext<TaskStatsContextType>({
 export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
   const [stats, setStats] = useState<TaskStats>(defaultStats)
   const [timeRange, setTimeRange] = useState<TimeRange>("today")
+  const [loading, setLoading] = useState<boolean>(true)
   
   // 使用useRef存储所有任务和任务状态
   const tasksRef = useRef<Task[]>([])
@@ -96,22 +98,65 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
     // 根据时间范围判断任务是否应被包含
     switch (range) {
       case "today":
-        return (dueDate && dueDate >= today && dueDate < tomorrow) || 
-               (plannedDate && plannedDate >= today && plannedDate < tomorrow)
+        return Boolean((dueDate && dueDate >= today && dueDate < tomorrow) || 
+               (plannedDate && plannedDate >= today && plannedDate < tomorrow))
       
       case "week":
-        return (dueDate && dueDate >= startOfWeek && dueDate <= endOfWeek) || 
-               (plannedDate && plannedDate >= startOfWeek && plannedDate <= endOfWeek)
+        return Boolean((dueDate && dueDate >= startOfWeek && dueDate <= endOfWeek) || 
+               (plannedDate && plannedDate >= startOfWeek && plannedDate <= endOfWeek))
       
       case "month":
-        return (dueDate && dueDate >= startOfMonth && dueDate <= endOfMonth) || 
-               (plannedDate && plannedDate >= startOfMonth && plannedDate <= endOfMonth)
+        return Boolean((dueDate && dueDate >= startOfMonth && dueDate <= endOfMonth) || 
+               (plannedDate && plannedDate >= startOfMonth && plannedDate <= endOfMonth))
       
       case "all":
       default:
         return true
     }
   }, [])
+  
+  // 从 IndexedDB 加载所有任务
+  const loadTasksFromDB = useCallback(async () => {
+    try {
+      setLoading(true)
+      // 只获取未删除的任务 - 使用数字 0 代替布尔值 false
+      const allTasks = await getByIndex<DBTask>(ObjectStores.TASKS, 'byIsDeleted', 0);
+      
+      // 转换为组件内部使用的任务格式
+      const tasks = allTasks.map((task: DBTask) => ({
+        id: task.id,
+        title: task.title,
+        completed: task.completed,
+        dueDate: task.dueDate,
+        plannedDate: task.plannedDate,
+        isFrog: task.isFrog
+      }));
+      
+      // 更新任务缓存
+      tasksRef.current = tasks;
+      
+      // 更新完成状态记录
+      const newCompletionStatus: Record<string, boolean> = {};
+      tasks.forEach((task: Task) => {
+        if (task.id !== undefined) {
+          newCompletionStatus[task.id.toString()] = task.completed;
+        }
+      });
+      taskCompletionStatusRef.current = newCompletionStatus;
+      
+      // 计算当前时间范围的统计数据
+      calculateStatsForTimeRange(timeRange);
+    } catch (error) {
+      console.error('从IndexedDB加载任务数据失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [timeRange]);
+  
+  // 在组件挂载和时间范围变化时加载任务
+  useEffect(() => {
+    loadTasksFromDB();
+  }, [loadTasksFromDB]);
   
   // 根据当前选择的时间范围过滤任务并计算统计数据
   const calculateStatsForTimeRange = useCallback((range: TimeRange) => {
@@ -131,15 +176,15 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
     calculateStatsForTimeRange(timeRange)
   }, [timeRange, calculateStatsForTimeRange])
   
-  // 更新任务统计的回调函数
-  const updateTaskStats = useCallback((
-    taskId: string, 
+  // 更新任务统计的回调函数 - 同时更新IndexedDB
+  const updateTaskStats = useCallback(async (
+    taskId: string | number, 
     completed: boolean, 
     isNew: boolean = false, 
     isRemoved: boolean = false
   ) => {
     // 获取之前的状态
-    const taskIndex = tasksRef.current.findIndex(t => t.id === taskId)
+    const taskIndex = tasksRef.current.findIndex(t => t.id == taskId)
     
     // 任务不存在且不是新增任务，则不处理
     if (taskIndex === -1 && !isNew) return
@@ -147,7 +192,21 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
     // 任务被删除
     if (isRemoved) {
       // 更新任务列表
-      tasksRef.current = tasksRef.current.filter(t => t.id !== taskId)
+      tasksRef.current = tasksRef.current.filter(t => t.id != taskId)
+      
+      try {
+        // 在IndexedDB中标记为删除（软删除）
+        const task = await get<DBTask>(ObjectStores.TASKS, taskId);
+        
+        if (task) {
+          task.isDeleted = true;
+          task.deletedAt = new Date();
+          await update(ObjectStores.TASKS, task);
+        }
+      } catch (error) {
+        console.error('删除任务时发生错误:', error);
+      }
+      
       // 重新计算统计数据
       calculateStatsForTimeRange(timeRange)
       return
@@ -155,131 +214,183 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
     
     // 新增任务
     if (isNew) {
-      const newTask: Task = {
-        id: taskId,
+      try {
+        // 创建新任务对象
+        const newTask: Partial<DBTask> = {
         title: `Task ${taskId}`, // 这里应该有实际的任务标题
         completed: completed,
+          isFrog: false,
+          isDeleted: false,
+          isRecurring: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         // 默认设置为今天作为截止日期
-        dueDate: new Date().toISOString().split('T')[0]
-      }
+          dueDate: new Date(),
+        };
+        
+        // 添加到 IndexedDB
+        const newId = await add(ObjectStores.TASKS, newTask);
+        
+        // 使用返回的 ID 创建任务对象
+        const taskForState = {
+          id: newId,
+          title: newTask.title || "",
+          completed: completed,
+          dueDate: newTask.dueDate,
+        };
       
       // 添加到任务列表
-      tasksRef.current.push(newTask)
+        tasksRef.current.push(taskForState);
+        
       // 记录完成状态
-      taskCompletionStatusRef.current[taskId] = completed
-      
-      // 重新计算统计数据
-      calculateStatsForTimeRange(timeRange)
-      return
-    }
-    
-    // 更新现有任务的完成状态
-    if (taskIndex !== -1) {
-      const updatedTasks = [...tasksRef.current]
-      updatedTasks[taskIndex] = {
-        ...updatedTasks[taskIndex],
-        completed
+        taskCompletionStatusRef.current[newId.toString()] = completed;
+        
+      } catch (error) {
+        console.error('添加新任务时发生错误:', error);
       }
-      tasksRef.current = updatedTasks
-      
-      // 记录完成状态
-      taskCompletionStatusRef.current[taskId] = completed
+    } else {
+      // 更新现有任务
+      try {
+        // 更新本地状态
+        tasksRef.current[taskIndex].completed = completed;
+        taskCompletionStatusRef.current[taskId.toString()] = completed;
+        
+        // 更新 IndexedDB
+        const task = await get<DBTask>(ObjectStores.TASKS, taskId);
+        if (task) {
+          task.completed = completed;
+          if (completed) {
+            task.completedAt = new Date();
+          } else {
+            task.completedAt = undefined;
+      }
+          task.updatedAt = new Date();
+          await update(ObjectStores.TASKS, task);
+        }
+      } catch (error) {
+        console.error('更新任务状态时发生错误:', error);
+        // 恢复之前的状态
+        tasksRef.current[taskIndex].completed = !completed;
+        taskCompletionStatusRef.current[taskId.toString()] = !completed;
+      }
+    }
       
       // 重新计算统计数据
       calculateStatsForTimeRange(timeRange)
-    }
-  }, [timeRange, calculateStatsForTimeRange])
+  }, [calculateStatsForTimeRange, timeRange])
   
   // 添加多个任务
-  const addTasks = useCallback((tasks: Task[]) => {
-    // 合并任务列表，避免重复
-    const newTasks = [...tasksRef.current]
-    let tasksChanged = false
-    
-    tasks.forEach(task => {
-      const existingIndex = newTasks.findIndex(t => t.id === task.id)
-      if (existingIndex === -1) {
-        newTasks.push(task)
-        taskCompletionStatusRef.current[task.id] = task.completed
-        tasksChanged = true
+  const addTasks = useCallback(async (tasks: Task[]) => {
+    try {
+      for (const taskData of tasks) {
+        if (typeof taskData.id === 'string' && taskData.id.startsWith('new-')) {
+          // 新任务，需要添加到 IndexedDB
+          const newTask: Partial<DBTask> = {
+            title: taskData.title,
+            description: '',
+            completed: taskData.completed || false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isFrog: taskData.isFrog || false,
+            isRecurring: false,
+            isDeleted: false,
+            dueDate: taskData.dueDate ? new Date(taskData.dueDate) : undefined,
+            plannedDate: taskData.plannedDate ? new Date(taskData.plannedDate) : undefined,
+          };
+          
+          // 添加到 IndexedDB
+          const newId = await add(ObjectStores.TASKS, newTask);
+          
+          // 更新本地任务 ID
+          taskData.id = newId;
+        } else {
+          // 更新现有任务
+          const existingTask = await get<DBTask>(ObjectStores.TASKS, taskData.id!);
+          if (existingTask) {
+            // 仅更新指定的字段
+            const updatedTask: Partial<DBTask> = {
+              ...existingTask,
+              title: taskData.title || existingTask.title,
+              completed: taskData.completed !== undefined ? taskData.completed : existingTask.completed,
+              dueDate: taskData.dueDate ? new Date(taskData.dueDate) : existingTask.dueDate,
+              plannedDate: taskData.plannedDate ? new Date(taskData.plannedDate) : existingTask.plannedDate,
+              isFrog: taskData.isFrog !== undefined ? taskData.isFrog : existingTask.isFrog,
+              updatedAt: new Date(),
+            };
+            
+            await update(ObjectStores.TASKS, updatedTask);
+          }
+        }
       }
-    })
-    
-    if (tasksChanged) {
-      tasksRef.current = newTasks
-      calculateStatsForTimeRange(timeRange)
-    }
-  }, [timeRange, calculateStatsForTimeRange])
-  
-  // 移除多个任务
-  const removeTasks = useCallback((taskIds: string[]) => {
-    // 过滤掉要删除的任务
-    const newTasks = tasksRef.current.filter(task => !taskIds.includes(task.id))
-    
-    if (newTasks.length !== tasksRef.current.length) {
-      tasksRef.current = newTasks
       
-      // 从状态记录中移除这些任务
-      const newCompletionStatus = { ...taskCompletionStatusRef.current }
-      taskIds.forEach(id => {
-        delete newCompletionStatus[id]
-      })
-      taskCompletionStatusRef.current = newCompletionStatus
-      
-      // 重新计算统计数据
-      calculateStatsForTimeRange(timeRange)
+      // 重新加载数据
+      await loadTasksFromDB();
+    } catch (error) {
+      console.error('添加或更新任务时发生错误:', error);
     }
-  }, [timeRange, calculateStatsForTimeRange])
+  }, [loadTasksFromDB]);
   
-  // 重新计算统计数据
+  // 移除多个任务（软删除）
+  const removeTasks = useCallback(async (taskIds: (string | number)[]) => {
+    try {
+      for (const taskId of taskIds) {
+        // 标记为已删除
+        const task = await get<DBTask>(ObjectStores.TASKS, taskId);
+        if (task) {
+          task.isDeleted = true;
+          task.deletedAt = new Date();
+          await update(ObjectStores.TASKS, task);
+        }
+      }
+      
+      // 更新本地状态
+      tasksRef.current = tasksRef.current.filter(task => 
+        task.id !== undefined && !taskIds.includes(task.id)
+      );
+      
+      // 更新统计
+      calculateStatsForTimeRange(timeRange);
+    } catch (error) {
+      console.error('删除任务时发生错误:', error);
+    }
+  }, [calculateStatsForTimeRange, timeRange]);
+  
+  // 根据提供的任务列表重新计算统计数据
   const recalculateStats = useCallback((tasks: Task[]) => {
-    if (!tasks || tasks.length === 0) return
+    const filteredTasks = tasks.filter(task => isTaskInTimeRange(task, timeRange))
     
-    // 更新任务列表
-    tasksRef.current = tasks
+    const newStats = {
+      total: filteredTasks.length,
+      completed: filteredTasks.filter(task => task.completed).length,
+      pending: filteredTasks.filter(task => !task.completed).length
+    }
     
-    // 更新完成状态记录
-    const newCompletionStatus: Record<string, boolean> = {}
-    tasks.forEach(task => {
-      newCompletionStatus[task.id] = task.completed
-    })
-    taskCompletionStatusRef.current = newCompletionStatus
-    
-    // 计算当前时间范围的统计数据
-    calculateStatsForTimeRange(timeRange)
-  }, [timeRange, calculateStatsForTimeRange])
-  
-  // 处理时间范围变更
-  const handleTimeRangeChange = useCallback((range: TimeRange) => {
-    setTimeRange(range)
-  }, [])
-  
-  // 使用memoized值包装context value，避免不必要的重渲染
-  const contextValue = React.useMemo(() => ({
+    setStats(newStats)
+  }, [isTaskInTimeRange, timeRange])
+
+  return (
+    <TaskStatsContext.Provider
+      value={{
     stats,
     timeRange,
-    setTimeRange: handleTimeRangeChange,
+        setTimeRange,
     updateTaskStats,
     recalculateStats,
     addTasks,
     removeTasks
-  }), [
-    stats, 
-    timeRange, 
-    handleTimeRangeChange, 
-    updateTaskStats, 
-    recalculateStats, 
-    addTasks, 
-    removeTasks
-  ])
-  
-  return (
-    <TaskStatsContext.Provider value={contextValue}>
+      }}
+    >
       {children}
     </TaskStatsContext.Provider>
   )
 }
 
 export function useTaskStats() {
-  return useContext(TaskStatsContext)
+  const context = useContext(TaskStatsContext)
+  
+  if (context === undefined) {
+    throw new Error('useTaskStats must be used within a TaskStatsProvider')
+  }
+  
+  return context
 }

@@ -1,7 +1,7 @@
 // IndexedDB 数据库实现
 // 定义数据库名称和版本号
 const DB_NAME = 'FocusPilotDB';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 // 定义对象存储名称
 export enum ObjectStores {
@@ -9,6 +9,12 @@ export enum ObjectStores {
   CATEGORIES = 'categories',
   SESSIONS = 'sessions',
   SETTINGS = 'settings',
+  GOALS = 'goals',
+  PROJECTS = 'projects',
+  EVENTS = 'events',
+  TIME_LOGS = 'timeLogs',
+  TAGS = 'tags',
+  APP_SETTINGS = 'appSettings',
 }
 
 // 定义打开数据库的接口
@@ -67,7 +73,7 @@ export const openDB = (): Promise<IDBResult> => {
         
         console.log(`数据库从版本 ${oldVersion} 升级到版本 ${DB_VERSION}`);
 
-        // 根据旧版本进行数据迁移
+        // 版本 1: 创建基本对象存储
         if (oldVersion < 1) {
           // 创建任务存储
           if (!db.objectStoreNames.contains(ObjectStores.TASKS)) {
@@ -78,10 +84,15 @@ export const openDB = (): Promise<IDBResult> => {
             
             // 创建索引
             taskStore.createIndex('title', 'title', { unique: false });
-            taskStore.createIndex('completed', 'completed', { unique: false });
-            taskStore.createIndex('dueDate', 'dueDate', { unique: false });
-            taskStore.createIndex('categoryId', 'categoryId', { unique: false });
-            taskStore.createIndex('priority', 'priority', { unique: false });
+            taskStore.createIndex('byDueDate', 'dueDate', { unique: false });
+            taskStore.createIndex('byCompleted', 'completed', { unique: false });
+            taskStore.createIndex('byPriority', 'priority', { unique: false });
+            taskStore.createIndex('byProjectId', 'projectId', { unique: false });
+            taskStore.createIndex('byGoalId', 'goalId', { unique: false });
+            taskStore.createIndex('byIsFrog', 'isFrog', { unique: false });
+            taskStore.createIndex('byTags', 'tags', { unique: false, multiEntry: true });
+            taskStore.createIndex('byPlannedDate', 'plannedDate', { unique: false });
+            taskStore.createIndex('byIsDeleted', 'isDeleted', { unique: false });
             
             console.log('创建任务存储及其索引');
           }
@@ -125,11 +136,95 @@ export const openDB = (): Promise<IDBResult> => {
             console.log('创建设置存储');
           }
         }
-
-        // 如果将来有版本 2 的迁移，添加如下代码：
-        // if (oldVersion < 2) {
-        //   // 版本 2 的数据库迁移逻辑
-        // }
+        
+        // 版本 2: 添加 Goals 对象存储
+        if (oldVersion < 2) {
+          // 创建目标存储
+          if (!db.objectStoreNames.contains(ObjectStores.GOALS)) {
+            const goalStore = db.createObjectStore(ObjectStores.GOALS, { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            
+            // 创建索引
+            goalStore.createIndex('name', 'name', { unique: false });
+            goalStore.createIndex('byTargetDate', 'targetDate', { unique: false });
+            goalStore.createIndex('byStatus', 'status', { unique: false });
+            
+            console.log('创建目标存储及其索引');
+          }
+        }
+        
+        // 版本 3: 添加 Projects、Events、TimeLogs、Tags 和 AppSettings 对象存储
+        if (oldVersion < 3) {
+          // 创建项目存储
+          if (!db.objectStoreNames.contains(ObjectStores.PROJECTS)) {
+            const projectStore = db.createObjectStore(ObjectStores.PROJECTS, { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            
+            // 创建索引
+            projectStore.createIndex('name', 'name', { unique: false });
+            projectStore.createIndex('byGoalId', 'goalId', { unique: false });
+            projectStore.createIndex('byStatus', 'status', { unique: false });
+            projectStore.createIndex('byDueDate', 'dueDate', { unique: false });
+            
+            console.log('创建项目存储及其索引');
+          }
+          
+          // 创建事件存储
+          if (!db.objectStoreNames.contains(ObjectStores.EVENTS)) {
+            const eventStore = db.createObjectStore(ObjectStores.EVENTS, { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            
+            // 创建索引
+            eventStore.createIndex('title', 'title', { unique: false });
+            eventStore.createIndex('byStartTime', 'startTime', { unique: false });
+            eventStore.createIndex('byIsRecurring', 'isRecurring', { unique: false });
+            
+            console.log('创建事件存储及其索引');
+          }
+          
+          // 创建时间日志存储
+          if (!db.objectStoreNames.contains(ObjectStores.TIME_LOGS)) {
+            const timeLogStore = db.createObjectStore(ObjectStores.TIME_LOGS, { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            
+            // 创建索引
+            timeLogStore.createIndex('byTaskId', 'taskId', { unique: false });
+            timeLogStore.createIndex('byProjectId', 'projectId', { unique: false });
+            timeLogStore.createIndex('byStartTime', 'startTime', { unique: false });
+            timeLogStore.createIndex('byDate', 'dateString', { unique: false });
+            
+            console.log('创建时间日志存储及其索引');
+          }
+          
+          // 创建标签存储
+          if (!db.objectStoreNames.contains(ObjectStores.TAGS)) {
+            const tagStore = db.createObjectStore(ObjectStores.TAGS, { 
+              keyPath: 'name' 
+            });
+            
+            // 创建索引 (通常不需要额外索引，因为键路径已经是name)
+            tagStore.createIndex('byUsageCount', 'usageCount', { unique: false });
+            
+            console.log('创建标签存储及其索引');
+          }
+          
+          // 创建应用设置存储
+          if (!db.objectStoreNames.contains(ObjectStores.APP_SETTINGS)) {
+            const appSettingsStore = db.createObjectStore(ObjectStores.APP_SETTINGS, { 
+              keyPath: 'key' 
+            });
+            
+            console.log('创建应用设置存储');
+          }
+        }
       };
     } catch (error) {
       console.error('尝试打开数据库时发生异常:', error);
@@ -454,12 +549,26 @@ export interface Task {
   id?: number;
   title: string;
   description?: string;
-  completed: boolean;
+  priority?: 'importantUrgent' | 'importantNotUrgent' | 'notImportantUrgent' | 'notImportantNotUrgent' | number;
   dueDate?: Date;
-  categoryId?: number;
-  priority?: 'low' | 'medium' | 'high';
+  completed: 0 | 1;
+  completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+  projectId?: number | string;
+  goalId?: number | string;
+  isFrog: 0 | 1;
+  estimatedPomodoros?: number;
+  actualPomodoros?: number;
+  subtasks?: { title: string; completed: 0 | 1 }[];
+  tags?: string[];
+  reminderDate?: Date;
+  isRecurring: 0 | 1;
+  recurrenceRule?: string | object;
+  plannedDate?: Date;
+  order?: number;
+  isDeleted: 0 | 1;
+  deletedAt?: Date;
 }
 
 export interface Category {
@@ -481,4 +590,75 @@ export interface Session {
 export interface Settings {
   id: string;
   value: any;
-} 
+}
+
+export interface Goal {
+  id?: number;
+  name: string;
+  description?: string;
+  targetDate?: Date;
+  status: 'active' | 'completed' | 'paused' | 'archived';
+  createdAt: Date;
+  updatedAt: Date;
+  milestones?: Array<{
+    title: string;
+    targetDate?: Date;
+    completed: boolean;
+  }>;
+  progress?: number; // 0-100 的进度值
+}
+
+export interface Project {
+  id?: number;
+  name: string;
+  description?: string;
+  goalId?: number | string;
+  status: 'active' | 'completed' | 'paused' | 'archived';
+  dueDate?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  color?: string;
+}
+
+export interface Event {
+  id?: number;
+  title: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  isAllDay: boolean;
+  isRecurring: boolean;
+  recurrenceRule?: string | object;
+  color?: string;
+  location?: string;
+  relatedTaskId?: number | string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface TimeLog {
+  id?: number;
+  taskId?: number | string;
+  projectId?: number | string;
+  activityDescription: string;
+  startTime: Date;
+  endTime: Date;
+  durationMinutes: number;
+  isPomodoro: boolean;
+  pomodoroCycle?: number;
+  tags?: string[];
+  dateString: string; // 格式为 YYYY-MM-DD，用于按日期索引
+  createdAt: Date;
+}
+
+export interface Tag {
+  name: string; // 作为主键
+  color?: string;
+  createdAt: Date;
+  usageCount?: number;
+}
+
+export interface AppSetting {
+  key: string; // 作为主键
+  value: any;
+}

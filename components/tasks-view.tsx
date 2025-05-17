@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import {
   AlertCircle,
   ArrowDown,
@@ -20,6 +20,7 @@ import {
   Tag,
   Timer,
   Trash2,
+  ArrowUpLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -52,93 +53,30 @@ import { CalendarIcon } from "@radix-ui/react-icons"
 import { format } from "date-fns"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { PomodoroModal } from "@/components/pomodoro-modal"
-
-interface Task {
-  id: number
-  title: string
-  description?: string
-  completed: boolean
-  priority: "important-urgent" | "important-not-urgent" | "not-important-urgent" | "not-important-not-urgent"
-  dueDate?: Date
-  project?: string
-  tags?: string[]
-  subtasks?: { id: number; title: string; completed: boolean }[]
-  isFrog?: boolean
-}
+import { ObjectStores, add, get, update, remove, getAll, getByIndex, Task as DBTaskType, Project as DBProjectType, Tag as DBTagType } from "@/lib/db"
+import { Loader2 } from "lucide-react"
+import { EditTaskDialog } from "./edit-task-dialog"
+import { TrashView } from "./trash-view"
+import { ConfirmationDialog } from "./confirmation-dialog"
+import {
+  NO_PROJECT_VALUE,
+  Task,
+  priorityMapToDB, 
+  priorityMapFromDB,
+  toDBTaskShape,
+  fromDBTaskShape
+} from "@/lib/task-utils"
 
 export function TasksView() {
-  const [tasks, setTasks] = useState<Task[]>([
-    {
-      id: 1,
-      title: "完成项目提案",
-      description: "为客户准备详细的项目提案文档",
-      completed: false,
-      priority: "important-urgent",
-      dueDate: new Date(2025, 4, 18),
-      project: "客户项目",
-      tags: ["工作", "文档"],
-      isFrog: true,
-      subtasks: [
-        { id: 101, title: "收集需求", completed: true },
-        { id: 102, title: "制定时间表", completed: false },
-        { id: 103, title: "估算预算", completed: false },
-      ],
-    },
-    {
-      id: 2,
-      title: "准备团队会议",
-      description: "准备下周团队会议的议程和材料",
-      completed: false,
-      priority: "important-not-urgent",
-      dueDate: new Date(2025, 4, 20),
-      project: "团队管理",
-      tags: ["会议", "准备"],
-    },
-    {
-      id: 3,
-      title: "回复客户邮件",
-      completed: false,
-      priority: "not-important-urgent",
-      dueDate: new Date(2025, 4, 17),
-      tags: ["邮件", "客户"],
-    },
-    {
-      id: 4,
-      title: "更新个人博客",
-      completed: false,
-      priority: "not-important-not-urgent",
-      project: "个人项目",
-      tags: ["写作", "个人"],
-    },
-    {
-      id: 5,
-      title: "学习新技术",
-      description: "花时间学习最新的前端框架",
-      completed: false,
-      priority: "important-not-urgent",
-      project: "个人发展",
-      tags: ["学习", "技术"],
-    },
-    {
-      id: 6,
-      title: "整理工作笔记",
-      completed: true,
-      priority: "not-important-not-urgent",
-      dueDate: new Date(2025, 4, 15),
-      tags: ["整理", "文档"],
-    },
-    {
-      id: 7,
-      title: "准备明天的演讲",
-      description: "为明天的客户演示准备演讲稿和幻灯片",
-      completed: false,
-      priority: "important-urgent",
-      dueDate: new Date(2025, 4, 18),
-      project: "客户项目",
-      tags: ["演讲", "准备"],
-      isFrog: true,
-    },
-  ])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [projectList, setProjectList] = useState<DBProjectType[]>([])
+  const [tagList, setTagList] = useState<DBTagType[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<Error | null>(null)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [taskToEdit, setTaskToEdit] = useState<Task | null>(null);
+  const [isConfirmDeleteDialogOpen, setIsConfirmDeleteDialogOpen] = useState(false);
+  const [taskToDeleteId, setTaskToDeleteId] = useState<number | null>(null);
 
   const [selectedView, setSelectedView] = useState("next-actions")
   const [selectedProject, setSelectedProject] = useState<string | null>(null)
@@ -152,22 +90,170 @@ export function TasksView() {
     title: "",
     description: "",
     priority: "important-not-urgent",
+    projectId: undefined,
     completed: false,
+    isFrog: false,
+    tags: [],
+    dueDate: undefined,
   })
   const [date, setDate] = useState<Date>()
   const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false)
-  const [selectedTaskForPomodoro, setSelectedTaskForPomodoro] = useState("")
   const [selectedTask, setSelectedTaskState] = useState<{ id: string; title: string } | null>(null)
 
-  // Get unique projects
-  const projects = Array.from(new Set(tasks.filter((task) => task.project).map((task) => task.project))) as string[]
+  // State for trash view
+  const [deletedTasks, setDeletedTasks] = useState<DBTaskType[]>([]) // Store raw DBTaskType for deletedAt
+  const [loadingTrash, setLoadingTrash] = useState<boolean>(false);
+  const [trashError, setTrashError] = useState<Error | null>(null);
+  const [taskToPermanentlyDeleteId, setTaskToPermanentlyDeleteId] = useState<number | null>(null);
+  const [isPermanentDeleteConfirmOpen, setIsPermanentDeleteConfirmOpen] = useState(false);
 
-  // Get unique tags
-  const tags = Array.from(
-    new Set(tasks.filter((task) => task.tags).flatMap((task) => task.tags as string[])),
-  ) as string[]
+  // Moved useCallback definitions before useEffect that uses them
+  const loadTasks = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const dbTasks = await getByIndex<DBTaskType>(ObjectStores.TASKS, 'byIsDeleted', 0);
+      const mappedTasks = dbTasks.map(fromDBTaskShape);
+      setTasks(mappedTasks);
+    } catch (err) {
+      console.error("Failed to load tasks:", err);
+      setError(err instanceof Error ? err : new Error('Failed to load tasks'));
+      setTasks([]); 
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  // Filter tasks based on selected view, project, tag, date, and search query
+  const loadProjects = useCallback(async () => {
+    try {
+      const dbProjects = await getAll<DBProjectType>(ObjectStores.PROJECTS);
+      setProjectList(dbProjects);
+    } catch (err) {
+      console.error("Failed to load projects:", err);
+    }
+  }, []);
+
+  const loadTags = useCallback(async () => {
+    try {
+      const dbTags = await getAll<DBTagType>(ObjectStores.TAGS);
+      setTagList(dbTags);
+    } catch (err) {
+      console.error("Failed to load tags:", err);
+    }
+  }, []);
+
+  const loadDeletedTasks = useCallback(async () => {
+    setLoadingTrash(true);
+    setTrashError(null);
+    try {
+      const dbDeletedTasks = await getByIndex<DBTaskType>(ObjectStores.TASKS, 'byIsDeleted', 1);
+      // Sort by deletedAt descending, then by updatedAt or createdAt as fallback
+      dbDeletedTasks.sort((a, b) => {
+        const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : (a.updatedAt ? new Date(a.updatedAt).getTime() : new Date(a.createdAt).getTime());
+        const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : (b.updatedAt ? new Date(b.updatedAt).getTime() : new Date(b.createdAt).getTime());
+        return dateB - dateA;
+      });
+      setDeletedTasks(dbDeletedTasks);
+    } catch (err) {
+      console.error("Failed to load deleted tasks:", err);
+      setTrashError(err instanceof Error ? err : new Error('加载已删除任务失败'));
+    } finally {
+      setLoadingTrash(false);
+    }
+  }, []);
+
+  const getProjectNameById = useCallback((projectId: number | string | undefined): string => {
+    if (projectId === undefined) return "";
+    const project = projectList.find(p => p.id === projectId);
+    return project ? project.name : String(projectId); 
+  }, [projectList]);
+
+  const handleCreateNewProject = useCallback(async (newProjectName: string): Promise<number | undefined> => {
+    if (!newProjectName.trim()) {
+      alert("项目名称不能为空。");
+      return undefined;
+    }
+    const existingProject = projectList.find(p => p.name.toLowerCase() === newProjectName.trim().toLowerCase());
+    if (existingProject) {
+      alert(`项目 "${existingProject.name}" 已存在。将自动选择该项目。`);
+      return existingProject.id;
+    }
+
+    try {
+      const newProjectData: Omit<DBProjectType, 'id'> = {
+        name: newProjectName.trim(),
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        // goalId, description, dueDate, color can be added later or set to defaults
+      };
+      const newId = await add(ObjectStores.PROJECTS, newProjectData as DBProjectType);
+      await loadProjects(); // Refresh project list
+      return newId;
+    } catch (err) {
+      console.error("Failed to create new project:", err);
+      alert("创建新项目失败。");
+      setError(err instanceof Error ? err : new Error('创建新项目失败'));
+      return undefined;
+    }
+  }, [projectList, loadProjects]);
+
+  const ensureTagsExist = useCallback(async (tagsToEnsure: string[]) => {
+    if (!tagsToEnsure || tagsToEnsure.length === 0) return;
+
+    const newTagsToCreate: DBTagType[] = [];
+    // Create a temporary set of current tag names for quick lookup, case-insensitive
+    const currentTagNamesLower = new Set(tagList.map(t => t.name.toLowerCase()));
+
+    for (const tagName of tagsToEnsure) {
+      const trimmedTagName = tagName.trim();
+      if (trimmedTagName && !currentTagNamesLower.has(trimmedTagName.toLowerCase())) {
+        // Avoid adding duplicates if they are typed again within the same input before saving
+        // and not yet in newTagsToCreate
+        if (!newTagsToCreate.find(nt => nt.name.toLowerCase() === trimmedTagName.toLowerCase())) {
+          newTagsToCreate.push({
+            name: trimmedTagName,
+            createdAt: new Date(),
+            // usageCount can be managed by a separate mechanism if needed
+          });
+        }
+      }
+    }
+
+    if (newTagsToCreate.length > 0) {
+      try {
+        // console.log("Creating new tags:", newTagsToCreate);
+        await Promise.all(newTagsToCreate.map(tag => add(ObjectStores.TAGS, tag)));
+        await loadTags(); // Refresh tag list to include newly added tags
+      } catch (err) {
+        console.error("Failed to create new tags:", err);
+        // Optionally notify user, but generally allow task operation to proceed
+      }
+    }
+  }, [tagList, loadTags]);
+
+  useEffect(() => {
+    if (selectedView === 'trash') {
+      loadDeletedTasks();
+    } else {
+      // When not in trash view, ensure main tasks and projects/tags are loaded.
+      // This might be redundant if they are already loaded, but ensures consistency if view changes rapidly.
+      loadTasks();
+      loadProjects();
+      loadTags();
+    }
+  }, [selectedView, loadTasks, loadProjects, loadTags, loadDeletedTasks]);
+
+  // Derived state for project and tag names for UI (e.g., sidebar filters)
+  const projectNamesForFilter = Array.from(new Set(projectList.map(p => p.name)));
+  const tagNamesForFilter = Array.from(new Set(tagList.map(t => t.name)));
+
+  const handlePomodoroClick = (taskId: number, taskTitle: string) => {
+    setSelectedTaskState({ id: String(taskId), title: taskTitle });
+    setPomodoroModalOpen(true);
+  };
+
+  // Filter tasks
   const filteredTasks = tasks.filter((task) => {
     // Filter by view
     if (selectedView === "next-actions" && task.completed) return false
@@ -175,8 +261,8 @@ export function TasksView() {
     if (selectedView === "someday-maybe" && task.priority !== "not-important-not-urgent") return false
     if (selectedView === "waiting" && task.priority !== "not-important-urgent") return false
 
-    // Filter by project
-    if (selectedProject && task.project !== selectedProject) return false
+    // Filter by project - Ensure consistent type for comparison (string)
+    if (selectedProject && String(task.projectId) !== selectedProject) return false
 
     // Filter by tag
     if (selectedTag && (!task.tags || !task.tags.includes(selectedTag))) return false
@@ -233,59 +319,301 @@ export function TasksView() {
     }
   })
 
-  const toggleTaskCompletion = (id: number) => {
-    setTasks(tasks.map((task) => (task.id === id ? { ...task, completed: !task.completed } : task)))
-  }
+  const toggleTaskCompletion = async (id: number) => {
+    const currentTask = tasks.find(t => t.id === id);
+    if (!currentTask) return;
 
-  const toggleSubtaskCompletion = (taskId: number, subtaskId: number) => {
-    setTasks(
-      tasks.map((task) => {
+    const newCompletedStatus = !currentTask.completed;
+    setTasks(prevTasks => 
+      prevTasks.map(task => 
+        task.id === id ? { ...task, completed: newCompletedStatus } : task
+      )
+    );
+
+    try {
+      const taskInDB = await get<DBTaskType>(ObjectStores.TASKS, id);
+      const updatedDbTask: DBTaskType = {
+        ...taskInDB,
+        completed: newCompletedStatus ? 1 : 0,
+        completedAt: newCompletedStatus ? new Date() : undefined,
+        updatedAt: new Date(),
+      };
+      await update(ObjectStores.TASKS, updatedDbTask);
+    } catch (dbError) {
+      console.error("Failed to update task completion in DB:", dbError);
+      setTasks(prevTasks => 
+        prevTasks.map(task => 
+          task.id === id ? { ...task, completed: currentTask.completed } : task
+        )
+      );
+      setError(dbError instanceof Error ? dbError : new Error('Failed to update task'));
+    }
+  };
+
+  const toggleSubtaskCompletion = async (taskId: number, subtaskId: number) => {
+    let originalTaskState: Task | undefined;
+    let optimisticallyUpdatedSubtasksForDB: { title: string; completed: 0 | 1; }[] | undefined;
+
+    setTasks(prevTasks =>
+      prevTasks.map(task => {
         if (task.id === taskId && task.subtasks) {
+          originalTaskState = JSON.parse(JSON.stringify(task)); 
+          const newSubtasks = task.subtasks.map(subtask =>
+            subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask,
+          );
+          optimisticallyUpdatedSubtasksForDB = newSubtasks.map(st => ({ title: st.title, completed: st.completed ? 1: 0}));
           return {
             ...task,
-            subtasks: task.subtasks.map((subtask) =>
-              subtask.id === subtaskId ? { ...subtask, completed: !subtask.completed } : subtask,
-            ),
-          }
+            subtasks: newSubtasks,
+          };
         }
-        return task
+        return task;
       }),
-    )
-  }
+    );
 
-  const handleCreateTask = () => {
-    if (newTask.title?.trim()) {
-      const createdTask: Task = {
-        id: Date.now(),
-        title: newTask.title,
-        description: newTask.description,
-        completed: false,
-        priority: newTask.priority as Task["priority"],
-        dueDate: date,
-        project: newTask.project,
-        tags: newTask.tags,
-        subtasks: [],
+    try {
+      if (optimisticallyUpdatedSubtasksForDB) {
+        const taskInDB = await get<DBTaskType>(ObjectStores.TASKS, taskId);
+        taskInDB.subtasks = optimisticallyUpdatedSubtasksForDB;
+        taskInDB.updatedAt = new Date();
+        await update(ObjectStores.TASKS, taskInDB);
       }
-      setTasks([...tasks, createdTask])
+    } catch (dbError) {
+      console.error("Failed to update subtask completion in DB:", dbError);
+      if (originalTaskState) {
+        setTasks(prevTasks => prevTasks.map(t => t.id === taskId ? originalTaskState! : t));
+      }
+      setError(dbError instanceof Error ? dbError : new Error('Failed to update subtask'));
+    }
+  };
+
+  const handleCreateTask = async () => {
+    if (newTask.title?.trim()) {
+      setLoading(true); 
+      const processedTags = newTask.tags?.map(t => t.trim()).filter(t => t) || [];
+
+      const dbTaskPayload: Omit<DBTaskType, 'id'> = {
+        title: newTask.title!,
+        description: newTask.description || undefined,
+        priority: newTask.priority ? priorityMapToDB[newTask.priority] : 'notImportantNotUrgent',
+        dueDate: newTask.dueDate ? new Date(newTask.dueDate) : undefined,
+        completed: 0, 
+        completedAt: undefined,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        projectId: newTask.projectId || undefined,
+        isFrog: (newTask.isFrog ?? false) ? 1 : 0, 
+        subtasks: newTask.subtasks?.map(st => ({ title: st.title, completed: (st.completed ? 1 : 0) as (0|1) })) || [], 
+        tags: processedTags, 
+        isRecurring: 0, 
+        isDeleted: 0, 
+        deletedAt: undefined,
+        goalId: undefined,
+        estimatedPomodoros: undefined,
+        actualPomodoros: undefined,
+        reminderDate: undefined,
+        recurrenceRule: undefined,
+        plannedDate: undefined,
+        order: undefined,
+      };
+
+      try {
+        // First, ensure tags exist or are created
+        if (processedTags.length > 0) {
+          await ensureTagsExist(processedTags);
+        }
+        
+        const newId = await add(ObjectStores.TASKS, dbTaskPayload as DBTaskType);
+        
+        // Reload all tasks to reflect the new one.
+        // loadProjects() and loadTags() should also be up-to-date if ensureTagsExist was called.
+        await loadTasks(); 
+        
       setNewTask({
         title: "",
         description: "",
         priority: "important-not-urgent",
+          projectId: undefined,
         completed: false,
-      })
-      setDate(undefined)
-      setIsCreateDialogOpen(false)
+          isFrog: false,
+          tags: [],
+          dueDate: undefined,
+        });
+        setIsCreateDialogOpen(false);
+      } catch (err) {
+        console.error("Failed to create task:", err);
+        setError(err instanceof Error ? err : new Error('Failed to create task'));
+      } finally {
+        setLoading(false);
+      }
     }
+  };
+
+  const openEditModal = (task: Task) => {
+    setTaskToEdit(task);
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateTask = async (updatedTaskData: Task) => {
+    if (!taskToEdit || taskToEdit.id === undefined) return;
+    setLoading(true);
+    try {
+      const originalTaskInDB = await get<DBTaskType>(ObjectStores.TASKS, taskToEdit.id);
+      const processedTags = updatedTaskData.tags?.map(t => t.trim()).filter(t => t) || [];
+      
+      // Ensure tags exist or are created before updating the task with them
+      if (processedTags.length > 0) {
+        await ensureTagsExist(processedTags);
+      }
+
+      const payloadForDB: DBTaskType = {
+        ...originalTaskInDB,
+        ...(toDBTaskShape(updatedTaskData)), // Apply general shape transformation
+        title: updatedTaskData.title, // Ensure specific fields from form are preserved if toDBTaskShape doesn't cover all
+        description: updatedTaskData.description, 
+        priority: updatedTaskData.priority ? priorityMapToDB[updatedTaskData.priority] : originalTaskInDB.priority, 
+        dueDate: updatedTaskData.dueDate ? new Date(updatedTaskData.dueDate) : undefined,
+        projectId: updatedTaskData.projectId, 
+        isFrog: updatedTaskData.isFrog ? 1 : 0,
+        tags: processedTags, // Use the processed tags
+        updatedAt: new Date(),
+      };
+      
+      // Remove undefined keys that might have been introduced by spreading updatedTaskData if it was partial
+      Object.keys(payloadForDB).forEach(key => (payloadForDB as any)[key] === undefined && delete (payloadForDB as any)[key]);
+
+      await update(ObjectStores.TASKS, payloadForDB);
+      
+      await loadTasks(); 
+      
+      setIsEditModalOpen(false);
+      setTaskToEdit(null);
+    } catch (err) {
+      console.error("Failed to update task:", err);
+      setError(err instanceof Error ? err : new Error('Failed to update task'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openDeleteConfirmDialog = (id: number) => {
+    setTaskToDeleteId(id);
+    setIsConfirmDeleteDialogOpen(true);
+  };
+
+  const handleDeleteTask = async () => {
+    if (taskToDeleteId === null) return;
+    setLoading(true);
+    try {
+      const taskInDB = await get<DBTaskType>(ObjectStores.TASKS, taskToDeleteId);
+      taskInDB.isDeleted = 1; // Set to 1 for true (soft delete)
+      taskInDB.deletedAt = new Date();
+      taskInDB.updatedAt = new Date();
+      await update(ObjectStores.TASKS, taskInDB);
+      
+      setTasks(prevTasks => prevTasks.filter(task => task.id !== taskToDeleteId));
+      setIsConfirmDeleteDialogOpen(false);
+      setTaskToDeleteId(null);
+    } catch (err) {
+      console.error("Failed to delete task:", err);
+      setError(err instanceof Error ? err : new Error('Failed to delete task'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleFrogStatus = async (id: number) => {
+    const currentTask = tasks.find(t => t.id === id);
+    if (!currentTask) return;
+
+    const newFrogStatus = !currentTask.isFrog;
+    setTasks(prevTasks => 
+      prevTasks.map(task => 
+        task.id === id ? { ...task, isFrog: newFrogStatus } : task
+      )
+    );
+
+    try {
+      const taskInDB = await get<DBTaskType>(ObjectStores.TASKS, id);
+      taskInDB.isFrog = newFrogStatus ? 1 : 0;
+      taskInDB.updatedAt = new Date();
+      await update(ObjectStores.TASKS, taskInDB);
+    } catch (dbError) {
+      console.error("Failed to update frog status in DB:", dbError);
+      setTasks(prevTasks => 
+        prevTasks.map(task => 
+          task.id === id ? { ...task, isFrog: currentTask.isFrog } : task
+        )
+      );
+      setError(dbError instanceof Error ? dbError : new Error('Failed to update frog status'));
+    }
+  };
+
+  const handleRestoreTask = useCallback(async (taskId: number) => {
+    setDeletedTasks(prev => prev.filter(task => task.id !== taskId)); // Optimistic update
+    try {
+      const taskToRestore = await get<DBTaskType>(ObjectStores.TASKS, taskId);
+      if (taskToRestore) {
+        taskToRestore.isDeleted = 0;
+        taskToRestore.deletedAt = undefined;
+        taskToRestore.updatedAt = new Date();
+        await update(ObjectStores.TASKS, taskToRestore);
+        // alert(`任务 "${taskToRestore.title}" 已恢复。`); // Optional: use a toast notification system
+        // Consider how to refresh the main task list. For now, rely on next view switch or manual refresh.
+        // If TaskStatsProvider is used globally and reacts to DB changes, it might handle it.
+        // Or, we could call loadTasks() if we want an immediate refresh of the main list, 
+        // but that might be too broad if the user stays in trash view.
+      } else {
+        throw new Error("未在数据库中找到要恢复的任务。");
+      }
+    } catch (err) {
+      console.error("Failed to restore task:", err);
+      alert("恢复任务失败。请重试。");
+      // Revert optimistic update if needed by reloading deleted tasks
+      loadDeletedTasks(); 
+    }
+  }, [loadDeletedTasks]);
+
+  const openPermanentDeleteConfirm = (taskId: number) => {
+    setTaskToPermanentlyDeleteId(taskId);
+    setIsPermanentDeleteConfirmOpen(true);
+  };
+
+  const handlePermanentlyDeleteTask = useCallback(async () => {
+    if (taskToPermanentlyDeleteId === null) return;
+
+    const taskIdToDelete = taskToPermanentlyDeleteId;
+    setDeletedTasks(prev => prev.filter(task => task.id !== taskIdToDelete)); // Optimistic update
+    setIsPermanentDeleteConfirmOpen(false); // Close dialog immediately
+    setTaskToPermanentlyDeleteId(null);
+
+    try {
+      await remove(ObjectStores.TASKS, taskIdToDelete);
+      // alert("任务已永久删除。"); // Optional: use a toast notification system
+    } catch (err) {
+      console.error("Failed to permanently delete task:", err);
+      alert("永久删除任务失败。请重试。");
+      loadDeletedTasks(); // Revert optimistic update
+    }
+  }, [taskToPermanentlyDeleteId, loadDeletedTasks]);
+
+  if (loading && tasks.length === 0) { // Show full page loader only on initial load
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
   }
 
-  const handlePomodoroClick = (taskId: string, taskTitle: string) => {
-    setSelectedTaskState({ id: taskId, title: taskTitle })
-    setPomodoroModalOpen(true)
-  }
-
-  const handlePomodoroClickOld = (taskName: string) => {
-    setSelectedTaskForPomodoro(taskName)
-    setPomodoroModalOpen(true)
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen text-red-500">
+        <AlertCircle className="h-12 w-12 mb-4" />
+        <h2 className="text-xl font-semibold mb-2">加载任务失败</h2>
+        <p>{error.message}</p>
+        <Button onClick={loadTasks} className="mt-4">重试</Button>
+      </div>
+    );
   }
 
   return (
@@ -368,14 +696,14 @@ export function TasksView() {
                       <PopoverTrigger asChild>
                         <Button
                           variant={"outline"}
-                          className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
+                          className={cn("w-full justify-start text-left font-normal", !newTask.dueDate && "text-muted-foreground")}
                         >
                           <CalendarIcon className="mr-2 h-4 w-4" />
-                          {date ? format(date, "PPP") : <span>选择日期</span>}
+                          {newTask.dueDate ? format(newTask.dueDate, "PPP") : <span>选择日期</span>}
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0">
-                        <CalendarComponent mode="single" selected={date} onSelect={setDate} initialFocus />
+                        <CalendarComponent mode="single" selected={newTask.dueDate} onSelect={(newDate) => setNewTask({...newTask, dueDate: newDate})} initialFocus />
                       </PopoverContent>
                     </Popover>
                   </div>
@@ -384,38 +712,56 @@ export function TasksView() {
                   <div className="grid gap-2">
                     <Label htmlFor="project">项目</Label>
                     <Select
-                      value={newTask.project}
-                      onValueChange={(value) => setNewTask({ ...newTask, project: value })}
+                      value={newTask.projectId?.toString() || NO_PROJECT_VALUE}
+                      onValueChange={async (value) => {
+                        if (value === 'new-project-create') {
+                          const newName = prompt("请输入新项目的名称:");
+                          if (newName) {
+                            const newProjectId = await handleCreateNewProject(newName);
+                            if (newProjectId !== undefined) {
+                              setNewTask({ ...newTask, projectId: newProjectId });
+                            }
+                          }
+                        } else if (value === NO_PROJECT_VALUE) {
+                          setNewTask({ ...newTask, projectId: undefined });
+                        } else {
+                          setNewTask({ ...newTask, projectId: value ? parseInt(value, 10) : undefined });
+                        }
+                      }}
                     >
                       <SelectTrigger id="project">
                         <SelectValue placeholder="选择项目（可选）" />
                       </SelectTrigger>
                       <SelectContent>
-                        {projects.map((project) => (
-                          <SelectItem key={project} value={project}>
-                            {project}
+                        <SelectItem value={NO_PROJECT_VALUE}>无项目</SelectItem>
+                        {projectList.map((proj) => (
+                          <SelectItem key={proj.id} value={String(proj.id)}>
+                            {proj.name}
                           </SelectItem>
                         ))}
-                        <SelectItem value="new">+ 创建新项目</SelectItem>
+                        <SelectItem value="new-project-create">+ 创建新项目</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="tags">标签</Label>
-                    <Select>
-                      <SelectTrigger id="tags">
-                        <SelectValue placeholder="选择标签（可选）" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tags.map((tag) => (
-                          <SelectItem key={tag} value={tag}>
-                            {tag}
-                          </SelectItem>
-                        ))}
-                        <SelectItem value="new">+ 创建新标签</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="tags-input-create">标签 (逗号分隔)</Label>
+                    <Input 
+                      id="tags-input-create" 
+                      placeholder="例如: 工作,个人"
+                      value={newTask.tags?.join(", ") || ""}
+                      onChange={(e) => setNewTask({ ...newTask, tags: e.target.value.split(",").map(tag => tag.trim()).filter(tag => tag) })}
+                    />
                   </div>
+                </div>
+                <div className="flex items-center space-x-2 mt-2">
+                  <Checkbox 
+                    id="isFrog-create"
+                    checked={newTask.isFrog}
+                    onCheckedChange={(checked) => setNewTask({ ...newTask, isFrog: !!checked})} 
+                  />
+                  <Label htmlFor="isFrog-create" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    标记为青蛙任务
+                  </Label>
                 </div>
               </div>
               <DialogFooter>
@@ -489,15 +835,15 @@ export function TasksView() {
             </CardHeader>
             <CardContent className="pb-3">
               <div className="space-y-1">
-                {projects.map((project) => (
+                {projectList.map((proj) => (
                   <Button
-                    key={project}
-                    variant={selectedProject === project ? "secondary" : "ghost"}
+                    key={proj.id}
+                    variant={selectedProject === String(proj.id) ? "secondary" : "ghost"}
                     className="w-full justify-start"
-                    onClick={() => setSelectedProject(selectedProject === project ? null : project)}
+                    onClick={() => setSelectedProject(selectedProject === String(proj.id) ? null : String(proj.id))}
                   >
                     <Flag className="h-4 w-4 mr-2" />
-                    {project}
+                    {proj.name} 
                   </Button>
                 ))}
               </div>
@@ -510,15 +856,15 @@ export function TasksView() {
             </CardHeader>
             <CardContent className="pb-3">
               <div className="space-y-1">
-                {tags.map((tag) => (
+                {tagList.map((tag) => (
                   <Button
-                    key={tag}
-                    variant={selectedTag === tag ? "secondary" : "ghost"}
+                    key={tag.name}
+                    variant={selectedTag === tag.name ? "secondary" : "ghost"}
                     className="w-full justify-start"
-                    onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                    onClick={() => setSelectedTag(selectedTag === tag.name ? null : tag.name)}
                   >
                     <Tag className="h-4 w-4 mr-2" />
-                    {tag}
+                    {tag.name}
                   </Button>
                 ))}
               </div>
@@ -567,9 +913,13 @@ export function TasksView() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card> {/* This is the bottom-most card for the actual trash link */}
             <CardContent className="py-3">
-              <Button variant="ghost" className="w-full justify-start">
+              <Button 
+                variant={selectedView === "trash" ? "secondary" : "ghost"} // Dynamically set variant
+                className="w-full justify-start"
+                onClick={() => setSelectedView("trash")} // Set onClick to change view
+              >
                 <Trash2 className="h-4 w-4 mr-2" />
                 回收站
               </Button>
@@ -642,7 +992,18 @@ export function TasksView() {
               </div>
             </CardHeader>
             <CardContent>
-              {viewMode === "list" ? (
+              {selectedView === "trash" ? (
+                // Trash View UI - Replaced with TrashView component
+                <TrashView 
+                  deletedTasks={deletedTasks}
+                  loadingTrash={loadingTrash}
+                  trashError={trashError}
+                  onRestoreTask={handleRestoreTask}
+                  onPermanentlyDeleteTask={openPermanentDeleteConfirm} // Pass the function that opens the confirm dialog
+                  onLoadRetry={loadDeletedTasks}
+                  // priorityMapFromDB={priorityMapFromDB} // Pass if TrashView expects it explicitly
+                />
+              ) : viewMode === "list" ? (
                 <div className="space-y-4">
                   {sortedTasks.length > 0 ? (
                     sortedTasks.map((task) => (
@@ -679,7 +1040,7 @@ export function TasksView() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8"
-                                onClick={() => handlePomodoroClickOld(task.title)}
+                                onClick={() => handlePomodoroClick(task.id, task.title)}
                               >
                                 <Timer className="h-4 w-4" />
                               </Button>
@@ -690,11 +1051,11 @@ export function TasksView() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => openEditModal(task)}>
                                     <Edit className="h-4 w-4 mr-2" />
                                     编辑
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>
                                     <Flag className="h-4 w-4 mr-2" />
                                     {task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}
                                   </DropdownMenuItem>
@@ -703,7 +1064,7 @@ export function TasksView() {
                                     添加到时间轴
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">
                                     <Trash2 className="h-4 w-4 mr-2" />
                                     删除
                                   </DropdownMenuItem>
@@ -753,10 +1114,10 @@ export function TasksView() {
                               </Badge>
                             )}
 
-                            {task.project && (
+                            {task.projectId && (
                               <Badge variant="outline" className="text-xs">
                                 <Flag className="h-3 w-3 mr-1" />
-                                {task.project}
+                                {getProjectNameById(task.projectId)} 
                               </Badge>
                             )}
 
@@ -861,13 +1222,22 @@ export function TasksView() {
                                       variant="ghost"
                                       size="icon"
                                       className="h-6 w-6"
-                                      onClick={() => handlePomodoroClickOld(task.title)}
+                                      onClick={() => handlePomodoroClick(task.id, task.title)}
                                     >
                                       <Timer className="h-3 w-3" />
                                     </Button>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-6 w-6">
                                       <MoreHorizontal className="h-3 w-3" />
                                     </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1 mt-1">
@@ -877,9 +1247,9 @@ export function TasksView() {
                                       {task.dueDate.toLocaleDateString()}
                                     </Badge>
                                   )}
-                                  {task.project && (
+                                  {task.projectId && (
                                     <Badge variant="outline" className="text-xs">
-                                      {task.project}
+                                      {getProjectNameById(task.projectId)} 
                                     </Badge>
                                   )}
                                 </div>
@@ -933,13 +1303,22 @@ export function TasksView() {
                                       variant="ghost"
                                       size="icon"
                                       className="h-6 w-6"
-                                      onClick={() => handlePomodoroClickOld(task.title)}
+                                      onClick={() => handlePomodoroClick(task.id, task.title)}
                                     >
                                       <Timer className="h-3 w-3" />
                                     </Button>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-6 w-6">
                                       <MoreHorizontal className="h-3 w-3" />
                                     </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1 mt-1">
@@ -949,9 +1328,9 @@ export function TasksView() {
                                       {task.dueDate.toLocaleDateString()}
                                     </Badge>
                                   )}
-                                  {task.project && (
+                                  {task.projectId && (
                                     <Badge variant="outline" className="text-xs">
-                                      {task.project}
+                                      {getProjectNameById(task.projectId)} 
                                     </Badge>
                                   )}
                                 </div>
@@ -1005,13 +1384,22 @@ export function TasksView() {
                                       variant="ghost"
                                       size="icon"
                                       className="h-6 w-6"
-                                      onClick={() => handlePomodoroClickOld(task.title)}
+                                      onClick={() => handlePomodoroClick(task.id, task.title)}
                                     >
                                       <Timer className="h-3 w-3" />
                                     </Button>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-6 w-6">
                                       <MoreHorizontal className="h-3 w-3" />
                                     </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1 mt-1">
@@ -1021,9 +1409,9 @@ export function TasksView() {
                                       {task.dueDate.toLocaleDateString()}
                                     </Badge>
                                   )}
-                                  {task.project && (
+                                  {task.projectId && (
                                     <Badge variant="outline" className="text-xs">
-                                      {task.project}
+                                      {getProjectNameById(task.projectId)} 
                                     </Badge>
                                   )}
                                 </div>
@@ -1077,13 +1465,22 @@ export function TasksView() {
                                       variant="ghost"
                                       size="icon"
                                       className="h-6 w-6"
-                                      onClick={() => handlePomodoroClickOld(task.title)}
+                                      onClick={() => handlePomodoroClick(task.id, task.title)}
                                     >
                                       <Timer className="h-3 w-3" />
                                     </Button>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-6 w-6">
                                       <MoreHorizontal className="h-3 w-3" />
                                     </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1 mt-1">
@@ -1093,9 +1490,9 @@ export function TasksView() {
                                       {task.dueDate.toLocaleDateString()}
                                     </Badge>
                                   )}
-                                  {task.project && (
+                                  {task.projectId && (
                                     <Badge variant="outline" className="text-xs">
-                                      {task.project}
+                                      {getProjectNameById(task.projectId)} 
                                     </Badge>
                                   )}
                                 </div>
@@ -1129,7 +1526,35 @@ export function TasksView() {
       <PomodoroModal
         open={pomodoroModalOpen}
         onOpenChange={setPomodoroModalOpen}
-        initialTask={selectedTaskForPomodoro}
+        initialTask={selectedTask}
+      />
+
+      {loading && <div className="fixed top-0 left-0 w-full h-full bg-black/20 flex items-center justify-center z-50"><Loader2 className="h-8 w-8 animate-spin text-white"/></div>}
+
+      <EditTaskDialog 
+        open={isEditModalOpen} 
+        onOpenChange={setIsEditModalOpen} 
+        task={taskToEdit} 
+        onSave={handleUpdateTask} 
+        availableProjects={projectList}
+        onCreateNewProject={handleCreateNewProject}
+      />
+
+      <ConfirmationDialog
+        open={isConfirmDeleteDialogOpen}
+        onOpenChange={setIsConfirmDeleteDialogOpen}
+        title="确认删除任务"
+        description={`您确定要删除任务吗？此操作将会软删除任务，之后可以在回收站找到。`}
+        onConfirm={handleDeleteTask}
+      />
+
+      {/* Confirmation Dialog for Permanent Delete from Trash */}
+      <ConfirmationDialog
+        open={isPermanentDeleteConfirmOpen}
+        onOpenChange={setIsPermanentDeleteConfirmOpen}
+        title="确认永久删除任务"
+        description="您确定要永久删除此任务吗？此操作无法撤销。"
+        onConfirm={handlePermanentlyDeleteTask} 
       />
     </div>
   )
