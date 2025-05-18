@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, FC, ReactNode } from "react";
 import {
   Activity,
   Calendar as CalendarIcon,
@@ -41,6 +41,23 @@ import {
 import { cn } from "@/lib/utils"
 import { type TimeBlock as DBTimeBlock, ObjectStores, getByIndex as getDBByIndex, remove as removeDB, add as addDB, update as updateDB, get as getDBItem, FixedBreakRule, getAll as getAllDB } from "@/lib/db"
 import { useToast } from "@/components/ui/use-toast"
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragStartEvent,
+  DragEndEvent,
+  UniqueIdentifier,
+  useDraggable,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+
+// Constants for DND behavior
+const PIXELS_PER_MINUTE_TIMELINE = 1; // Assumption: 1 pixel of vertical drag = 1 minute change. This should be calibrated.
+const SNAP_GRID_MINUTES = 15; // Snap to 15-minute intervals.
+const MIN_DURATION_MINUTES = 15; // Minimum duration for a time block.
+
 
 interface UITimeBlock extends DBTimeBlock {
   id: number;
@@ -87,6 +104,163 @@ interface TimelineCardProps {
   onPomodoroClick: (taskId: string, taskTitle: string) => void;
 }
 
+
+// Helper components for DND
+interface TimelineBlockItemContentProps {
+  block: UITimeBlock;
+  isActuallyDragging: boolean; 
+  onPomodoroClick: (taskId: string, taskTitle: string) => void;
+  handleOpenEditModal: (block: UITimeBlock) => void;
+  handleDeleteBlock: (blockId: number, blockTitle: string) => void;
+  getIconForType: (type: UITimeBlock['type']) => ReactNode;
+  getDisplayType: (type: UITimeBlock['type']) => string;
+  currentTime: Date;
+}
+
+const TimelineBlockItemContent: FC<TimelineBlockItemContentProps & {
+  attributes: Record<string, any>;
+  listeners: Record<string, any>;
+  refForward: (node: HTMLElement | null) => void;
+  style?: React.CSSProperties;
+}> = ({
+  block,
+  isActuallyDragging,
+  onPomodoroClick,
+  handleOpenEditModal,
+  handleDeleteBlock,
+  getIconForType,
+  getDisplayType,
+  currentTime,
+  attributes,
+  listeners,
+  refForward,
+  style
+}) => {
+  const isCurrent = currentTime >= block.startTime && currentTime < block.endTime;
+  const typeDisplay = getDisplayType(block.type);
+
+  return (
+    <div
+      ref={refForward}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={cn(isActuallyDragging ? "opacity-70 shadow-2xl" : "", "transition-shadow")} 
+    >
+      <div className="relative pl-8 pb-4">
+        <div
+          className={cn(
+            "absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center shadow",
+            isCurrent
+              ? "bg-blue-100 text-blue-600 ring-2 ring-blue-500 ring-offset-1"
+              : block.type === "break" 
+                ? (block.fixedBreakId ? "bg-teal-100 text-teal-700" : "bg-green-100 text-green-600")
+                : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
+          )}
+          title={isCurrent ? "进行中" : (block.fixedBreakId ? `固定${typeDisplay}` : typeDisplay)}
+        >
+          {isCurrent ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            getIconForType(block.type)
+          )}
+        </div>
+        <div
+          className={cn(
+            "rounded-lg border p-3 shadow-sm transition-all hover:shadow-md",
+            isCurrent
+              ? "border-blue-300 bg-blue-50 dark:bg-blue-950 dark:border-blue-700"
+              : block.type === "break"
+                ? (block.fixedBreakId ? "border-teal-200 bg-teal-50 dark:bg-teal-950 dark:border-teal-700" : "border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-700")
+                : "border-gray-200 bg-white dark:bg-gray-800 dark:border-gray-700",
+            isActuallyDragging ? "ring-2 ring-primary" : ""
+          )}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{block.title}</span>
+            <span className="text-xs text-muted-foreground">{formatTime(block.startTime)} - {formatTime(block.endTime)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-xs font-medium",
+                block.type === "task" ? "border-blue-400 text-blue-600 bg-blue-50 dark:border-blue-600 dark:text-blue-300 dark:bg-blue-900/50"
+                : block.type === "meeting" ? "border-purple-400 text-purple-600 bg-purple-50 dark:border-purple-600 dark:text-purple-300 dark:bg-purple-900/50"
+                : block.type === "break"
+                  ? (block.fixedBreakId ? "border-teal-400 text-teal-600 bg-teal-50 dark:border-teal-600 dark:text-teal-300 dark:bg-teal-900/50" : "border-green-400 text-green-600 bg-green-50 dark:border-green-600 dark:text-green-300 dark:bg-green-900/50")
+                : block.type === "plan" ? "border-amber-400 text-amber-600 bg-amber-50 dark:border-amber-600 dark:text-amber-300 dark:bg-amber-900/50"
+                : block.type === "personal" ? "border-pink-400 text-pink-600 bg-pink-50 dark:border-pink-600 dark:text-pink-300 dark:bg-pink-900/50"
+                : "border-gray-400 text-gray-600 bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:bg-gray-900/50",
+              )}
+            >
+              {block.fixedBreakId ? `固定${typeDisplay}` : typeDisplay}
+            </Badge>
+            <div className="flex items-center space-x-1">
+              {block.taskId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="启动专注"
+                  onClick={() => block.taskId && onPomodoroClick(String(block.taskId), block.title)}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" disabled={isActuallyDragging}>
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleOpenEditModal(block)}>
+                    <Edit3 className="mr-2 h-4 w-4" /> 编辑
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-red-600 hover:!text-red-600 focus:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/50 focus:!bg-red-50 dark:focus:!bg-red-900/50"
+                    onClick={() => handleDeleteBlock(block.id, block.title)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" /> 删除
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DraggableTimelineBlock: FC<{ block: UITimeBlock; activeDndId: UniqueIdentifier | null; } & Omit<TimelineBlockItemContentProps, 'block' | 'isActuallyDragging'>> = ({ block, activeDndId, ...contentProps }) => {
+  const { attributes, listeners, setNodeRef, transform, active } = useDraggable({
+    id: String(block.id),
+  });
+
+  const isActuallyDragging = active?.id === String(block.id);
+
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition: active?.id === String(block.id) ? 'none' : 'transform 0.2s ease-out', 
+    zIndex: isActuallyDragging ? 1000 : 'auto', 
+  };
+
+  return (
+    <TimelineBlockItemContent
+      block={block}
+      isActuallyDragging={isActuallyDragging}
+      {...contentProps}
+      attributes={attributes}
+      listeners={listeners}
+      refForward={setNodeRef}
+      style={style}
+    />
+  );
+};
+
+
 export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const { toast } = useToast();
   const [timeBlocks, setTimeBlocks] = useState<UITimeBlock[]>([]);
@@ -105,16 +279,154 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
   const isProcessingFixedBreaksRef = useRef(false);
 
+  // DND States
+  const [activeDndId, setActiveDndId] = useState<UniqueIdentifier | null>(null);
+  const [initialDragBlockState, setInitialDragBlockState] = useState<UITimeBlock | null>(null);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // User must drag for 8px before DND starts
+      },
+    })
+  );
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event;
+    setActiveDndId(active.id);
+    const draggedBlock = timeBlocks.find(b => String(b.id) === String(active.id));
+    if (draggedBlock) {
+      setInitialDragBlockState(JSON.parse(JSON.stringify(draggedBlock))); // Deep copy
+    }
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    setActiveDndId(null); 
+
+    if (!initialDragBlockState || !event.active) {
+      setInitialDragBlockState(null);
+      return;
+    }
+
+    const originalBlockSnapshot = initialDragBlockState; 
+    const { delta } = event; 
+
+    let newStartTime = new Date(originalBlockSnapshot.startTime);
+    let newEndTime = new Date(originalBlockSnapshot.endTime);
+    const minutesOffset = Math.round(delta.y / PIXELS_PER_MINUTE_TIMELINE);
+
+    newStartTime.setMinutes(newStartTime.getMinutes() + minutesOffset);
+    newEndTime.setMinutes(newEndTime.getMinutes() + minutesOffset);
+    
+    newStartTime.setSeconds(0, 0); 
+    newEndTime.setSeconds(0, 0);
+    newStartTime.setMinutes(Math.round(newStartTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES);
+    newEndTime.setMinutes(Math.round(newEndTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES);
+
+    const todayString = getTodayDateString();
+    const dayStart = new Date(new Date(`${todayString}T00:00:00`).setSeconds(0,0));
+    const dayEnd = new Date(new Date(`${todayString}T23:59:59`).setSeconds(59,999));
+
+    if (newStartTime < dayStart) newStartTime = dayStart;
+    if (newEndTime > dayEnd) newEndTime = dayEnd;
+    
+    if (newStartTime.getTime() >= dayEnd.getTime()) {
+        newStartTime = new Date(dayEnd.getTime() - MIN_DURATION_MINUTES * 60000);
+        newStartTime.setMinutes(Math.round(newStartTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
+    }
+    if (newEndTime.getTime() <= newStartTime.getTime()) { 
+        const originalDuration = originalBlockSnapshot.endTime.getTime() - originalBlockSnapshot.startTime.getTime();
+        newEndTime = new Date(newStartTime.getTime() + originalDuration);
+        newEndTime.setMinutes(Math.round(newEndTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
+        if (newEndTime.getTime() > dayEnd.getTime()) newEndTime = dayEnd; 
+    }
+
+
+    const minDurationMillis = MIN_DURATION_MINUTES * 60000;
+    let currentDurationMillis = newEndTime.getTime() - newStartTime.getTime();
+
+    if (currentDurationMillis < minDurationMillis) {
+        newEndTime = new Date(newStartTime.getTime() + minDurationMillis);
+        newEndTime.setMinutes(Math.round(newEndTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
+        if (newEndTime.getTime() > dayEnd.getTime()) {
+            newEndTime = dayEnd;
+            newStartTime = new Date(newEndTime.getTime() - minDurationMillis);
+            newStartTime.setMinutes(Math.round(newStartTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
+            if (newStartTime.getTime() < dayStart.getTime()) newStartTime = dayStart; 
+        }
+        currentDurationMillis = newEndTime.getTime() - newStartTime.getTime(); 
+        if (currentDurationMillis < minDurationMillis || newEndTime.getTime() <= newStartTime.getTime()) { 
+             toast({ title: "操作无效", description: `时长至少为 ${MIN_DURATION_MINUTES} 分钟，且结束时间需晚于开始时间。已还原。`, variant: "destructive" });
+             setInitialDragBlockState(null);
+             return;
+        }
+    }
+
+    let collisionDetected = false;
+    for (const existingBlock of timeBlocks) {
+      if (existingBlock.id === originalBlockSnapshot.id) continue; 
+
+      const existingStart = new Date(existingBlock.startTime);
+      const existingEnd = new Date(existingBlock.endTime);
+
+      if (newStartTime.getTime() < existingEnd.getTime() && newEndTime.getTime() > existingStart.getTime()) {
+        collisionDetected = true;
+        break;
+      }
+    }
+
+    if (collisionDetected) {
+      toast({ title: "操作无效", description: "时间块与现有安排重叠。已还原。", variant: "destructive" });
+      setInitialDragBlockState(null);
+      return;
+    }
+
+    const blockToUpdateFromState = timeBlocks.find(b => b.id === originalBlockSnapshot.id);
+    if (!blockToUpdateFromState) {
+        console.error("Error: Could not find the block to update in current state array.");
+        setInitialDragBlockState(null);
+        return;
+    }
+    
+    const updatedBlockData: DBTimeBlock = {
+      ...blockToUpdateFromState, 
+      id: originalBlockSnapshot.id, 
+      startTime: newStartTime,
+      endTime: newEndTime,
+      date: newStartTime.toISOString().split('T')[0], 
+      updatedAt: new Date(),
+    };
+
+    if (updatedBlockData.fixedBreakId) {
+      delete updatedBlockData.fixedBreakId;
+      toast({ title: "提示", description: "固定休息块已转为普通时间块。", duration: 3500, variant: "default" });
+    }
+
+    try {
+      setLoading(true);
+      await updateDB(ObjectStores.TIME_BLOCKS, updatedBlockData);
+      toast({ title: "时间轴已更新", description: `时间块 "${updatedBlockData.title}" 已成功调整。` });
+      await loadTimeBlocks("drag_end_successful_update"); 
+    } catch (err) {
+      console.error("Failed to update time block after drag:", err);
+      toast({ title: "更新失败", description: "无法保存时间块更改，请重试。", variant: "destructive" });
+    } finally {
+      setLoading(false);
+      setInitialDragBlockState(null);
+    }
+  };
+
+
   const loadTimeBlocks = useCallback(async (triggeredBy?: string) => {
     console.log(`loadTimeBlocks triggered. Source: ${triggeredBy || 'initial/unknown'}. Lock status: ${isProcessingFixedBreaksRef.current}`);
-    if (isProcessingFixedBreaksRef.current) {
-      console.warn("loadTimeBlocks: Processing already in progress. Skipping this call.");
+    if (isProcessingFixedBreaksRef.current && triggeredBy !== "drag_end_successful_update" && triggeredBy !== "modal_save" && triggeredBy !== "delete_block" ) {
+      console.warn("loadTimeBlocks: Processing already in progress by another operation. Skipping this call to avoid conflict.");
       return;
     }
 
     isProcessingFixedBreaksRef.current = true;
     setError(null); 
-    setLoading(true);
+    // setLoading(true); // setLoading is handled by specific operations like dragEnd or initial useEffect
 
     try {
       const todayString = getTodayDateString();
@@ -128,17 +440,15 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         rule.daysOfWeek.includes(dayOfWeekToday)
       );
 
-      // Step 1: Get all existing time blocks for today initially
       const initialExistingBlocks = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayString);
       const blocksToAdd: Omit<DBTimeBlock, 'id'>[] = [];
-      // Keep track of fixedBreakIds that are processed to avoid duplicates within this run if rules somehow overlap conceptually (though rule.id should be unique)
       const processedFixedBreakIdsInThisRun = new Set<string>(); 
 
       for (const rule of activeRulesForToday) {
-        if (rule.id === undefined) continue; // Should not happen with auto-increment DB IDs
+        if (rule.id === undefined) continue; 
         const fixedBreakIdStr = String(rule.id);
 
-        if (processedFixedBreakIdsInThisRun.has(fixedBreakIdStr)) continue; // Already decided to add this one
+        if (processedFixedBreakIdsInThisRun.has(fixedBreakIdStr)) continue; 
 
         const alreadyExistsInInitialLoad = initialExistingBlocks.some(
           block => block.fixedBreakId === fixedBreakIdStr && block.type === 'break' && block.date === todayString
@@ -148,13 +458,13 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           const [startHour, startMinute] = rule.startTime.split(':').map(Number);
           const [endHour, endMinute] = rule.endTime.split(':').map(Number);
 
-          const startTime = new Date(todayDateObj); 
+          let startTime = new Date(todayDateObj); 
           startTime.setHours(startHour, startMinute, 0, 0);
 
-          const endTime = new Date(todayDateObj); 
+          let endTime = new Date(todayDateObj); 
           endTime.setHours(endHour, endMinute, 0, 0);
           
-          if (endTime <= startTime) {
+          if (endTime.getTime() <= startTime.getTime()) { // use getTime for comparison
               console.warn(`Invalid fixed break rule (end <= start): ${rule.label || rule.id} for ${todayString}`);
               continue;
           }
@@ -175,19 +485,16 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         }
       }
 
-      // Step 2: Add all new blocks collected, if any
       if (blocksToAdd.length > 0) {
         for (const payload of blocksToAdd) {
           try {
             await addDB(ObjectStores.TIME_BLOCKS, payload);
           } catch (addError) {
             console.error(`Failed to add fixed break from rule '${payload.title}' to DB:`, addError);
-            // Optionally, remove from processedFixedBreakIdsInThisRun if add failed, though it might retry next load
           }
         }
       }
 
-      // Step 3: Now, fetch all blocks again to get the definitive list after adds
       const allTodayDbBlocksFromDB = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayString);
       const validRuleIdsFromSettings = new Set(allFixedRules.map(rule => String(rule.id)));
       const blocksToRemoveIds: number[] = [];
@@ -200,15 +507,15 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
               if (block.id !== undefined) {
                 blocksToRemoveIds.push(block.id);
               }
-              return false; // Filter out this orphaned block
+              return false; 
             }
           }
-          return true; // Keep other blocks or valid fixed breaks
+          return true; 
         })
         .map(block => ({
           ...block,
           id: block.id!,
-          startTime: new Date(block.startTime),
+          startTime: new Date(block.startTime), 
           endTime: new Date(block.endTime)
         } as UITimeBlock))
         .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
@@ -217,6 +524,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
       if (blocksToRemoveIds.length > 0) {
         console.log("Removing orphaned fixed break blocks from DB:", blocksToRemoveIds);
+        // This runs in background, no await needed here not to block UI updates
         (async () => {
           for (const idToRemove of blocksToRemoveIds) {
             try {
@@ -237,19 +545,27 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     } catch (err) {
       console.error("Failed to load time blocks:", err);
       setError("无法加载今日时间轴数据。");
-      toast({
-        title: "加载失败",
-        description: "无法加载时间轴数据。",
-        variant: "destructive",
-      });
+      // Don't toast here if a more specific error is toasted by the caller
+      if (!triggeredBy?.includes("drag_end") && !triggeredBy?.includes("modal_save")) {
+        toast({
+            title: "加载失败",
+            description: "无法加载时间轴数据。",
+            variant: "destructive",
+        });
+      }
     } finally {
       isProcessingFixedBreaksRef.current = false;
-      setLoading(false);
+      // setLoading(false) should be handled by the caller if it set it to true
+      // However, for general calls like initial load or error retry, set it here.
+      if (triggeredBy === "useEffect initial mount" || triggeredBy === "useEffect timelineShouldUpdate event" || triggeredBy === "error_retry_button") {
+        setLoading(false); 
+      }
       console.log("loadTimeBlocks finished. Lock released.");
     }
   }, [toast]);
 
   useEffect(() => {
+    setLoading(true); 
     loadTimeBlocks("useEffect initial mount");
     const timerId = setInterval(() => {
       setCurrentTime(new Date());
@@ -257,6 +573,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
     const handleExternalTimelineUpdate = () => {
         console.log("timelineShouldUpdate event received, preparing to call loadTimeBlocks.");
+        setLoading(true); 
         loadTimeBlocks("useEffect timelineShouldUpdate event");
     };
     window.addEventListener('timelineShouldUpdate', handleExternalTimelineUpdate);
@@ -265,9 +582,9 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       clearInterval(timerId);
       window.removeEventListener('timelineShouldUpdate', handleExternalTimelineUpdate);
     };
-  }, [loadTimeBlocks]);
+  }, [loadTimeBlocks]); 
 
-  const getIconForType = (type: UITimeBlock['type']) => {
+  const getIconForType = (type: UITimeBlock['type']): ReactNode => {
     switch (type) {
       case 'task': return <Activity className="h-4 w-4" />;
       case 'meeting': return <CalendarIcon className="h-4 w-4" />;
@@ -298,7 +615,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           title: "删除成功",
           description: `时间块 "${blockTitle}" 已被移除。它可能会在明日根据固定规则重新生成（如果适用）。`,
         });
-        await loadTimeBlocks(); 
+        await loadTimeBlocks("delete_block"); 
       } catch (err) {
         console.error("Failed to delete time block:", err);
         toast({
@@ -358,15 +675,15 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       toast({ title: "验证错误", description: "标题不能为空。", variant: "destructive" });
       return;
     }
-    const start = new Date(startTimeStr);
-    const end = new Date(endTimeStr);
+    let start = new Date(startTimeStr);
+    let end = new Date(endTimeStr);
 
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
         toast({ title: "验证错误", description: "开始或结束时间无效。", variant: "destructive" });
         return;
     }
 
-    if (end <= start) {
+    if (end.getTime() <= start.getTime()) { // use getTime for comparison
       toast({ title: "验证错误", description: "结束时间必须在开始时间之后。", variant: "destructive" });
       return;
     }
@@ -392,11 +709,15 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
             if (!isNaN(ruleIdNum)) {
               const originalRule = await getDBItem<FixedBreakRule>(ObjectStores.FIXED_BREAK_RULES, ruleIdNum);
               if (originalRule) {
+                // Format DB times to compare with rule times (which are HH:MM strings)
+                const blockStartTimeFormatted = formatTime(blockToUpdate.startTime);
+                const blockEndTimeFormatted = formatTime(blockToUpdate.endTime);
+
                 if (
                   blockToUpdate.type !== 'break' ||
                   blockToUpdate.title !== (originalRule.label || "固定休息") || 
-                  formatTime(blockToUpdate.startTime) !== originalRule.startTime ||
-                  formatTime(blockToUpdate.endTime) !== originalRule.endTime
+                  blockStartTimeFormatted !== originalRule.startTime ||
+                  blockEndTimeFormatted !== originalRule.endTime
                 ) {
                   convertedToNormal = true;
                 }
@@ -430,7 +751,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         await addDB(ObjectStores.TIME_BLOCKS, newBlockPayload);
         toast({ title: "创建成功", description: `时间块 "${title}" 已添加到时间轴。` });
       }
-      await loadTimeBlocks();
+      await loadTimeBlocks("modal_save");
       handleModalClose();
     } catch (err) {
       console.error("Failed to save time block:", err);
@@ -454,7 +775,8 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     }
   };
 
-  if (loading && timeBlocks.length === 0) {
+  // Initial loading and error states are handled first
+  if (loading && timeBlocks.length === 0 && !error) { // Added !error to ensure error screen shows if error during initial load
     return (
       <Card className="h-full flex flex-col">
         <CardHeader className="pb-2">
@@ -483,7 +805,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         <CardContent className="pb-2 flex-grow flex flex-col justify-center items-center min-h-[200px] text-red-500">
           <AlertCircle className="h-8 w-8 mb-2" />
           <p>{error}</p>
-          <Button variant="outline" size="sm" onClick={() => loadTimeBlocks("error_retry_button")} className="mt-4">
+          <Button variant="outline" size="sm" onClick={() => {setLoading(true); loadTimeBlocks("error_retry_button");}} className="mt-4">
             重试
           </Button>
         </CardContent>
@@ -496,10 +818,11 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     );
   }
 
+  // Main return for when data is available or it's loading more data in background
   return (
     <Card className="h-full flex flex-col relative">
       {loading && timeBlocks.length > 0 && (
-        <div className="absolute inset-0 bg-background/80 flex justify-center items-center z-10">
+        <div className="absolute inset-0 bg-background/80 flex justify-center items-center z-20">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       )}
@@ -507,116 +830,38 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         <div className="flex items-center justify-between">
           <CardTitle className="text-md font-medium">今日时间轴</CardTitle>
         </div>
-        <CardDescription>您今日的日程安排</CardDescription>
+        <CardDescription>您今日的日程安排 {loading && timeBlocks.length > 0 && "(更新中...)"}</CardDescription>
       </CardHeader>
       <CardContent className="pb-2 flex-grow overflow-y-auto">
-        {timeBlocks.length === 0 ? (
+        {timeBlocks.length === 0 && !loading ? (
           <div className="flex flex-col items-center justify-center py-10 text-center min-h-[200px]">
             <CheckCircle2 className="h-10 w-10 text-green-500 mb-3" />
             <p className="text-md text-muted-foreground">今日时间轴为空。</p>
             <p className="text-sm text-muted-foreground">尝试从任务列表添加，或直接在此处创建时间块。</p>
           </div>
         ) : (
-          <div className="relative pt-2">
-            <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-muted rounded-full"></div>
-
-            {timeBlocks.map((block) => {
-              const isCurrent = currentTime >= block.startTime && currentTime < block.endTime;
-              const typeDisplay = getDisplayType(block.type);
-              
-              return (
-                <div key={block.id} className="relative pl-8 pb-4">
-              <div
-                className={cn(
-                      "absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center shadow",
-                      isCurrent
-                        ? "bg-blue-100 text-blue-600 ring-2 ring-blue-500 ring-offset-1"
-                        : block.type === "break" 
-                          ? (block.fixedBreakId ? "bg-teal-100 text-teal-700" : "bg-green-100 text-green-600")
-                          : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
-                    )}
-                    title={isCurrent ? "进行中" : (block.fixedBreakId ? `固定${typeDisplay}` : typeDisplay)}
-                  >
-                    {isCurrent ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                      getIconForType(block.type)
-                )}
-              </div>
-
-              <div
-                className={cn(
-                      "rounded-lg border p-3 shadow-sm transition-all hover:shadow-md",
-                      isCurrent
-                        ? "border-blue-300 bg-blue-50 dark:bg-blue-950 dark:border-blue-700"
-                    : block.type === "break"
-                          ? (block.fixedBreakId ? "border-teal-200 bg-teal-50 dark:bg-teal-950 dark:border-teal-700" : "border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-700")
-                          : "border-gray-200 bg-white dark:bg-gray-800 dark:border-gray-700",
-                )}
-              >
-                <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{block.title}</span>
-                      <span className="text-xs text-muted-foreground">{formatTime(block.startTime)} - {formatTime(block.endTime)}</span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                          "text-xs font-medium",
-                          block.type === "task" ? "border-blue-400 text-blue-600 bg-blue-50 dark:border-blue-600 dark:text-blue-300 dark:bg-blue-900/50"
-                          : block.type === "meeting" ? "border-purple-400 text-purple-600 bg-purple-50 dark:border-purple-600 dark:text-purple-300 dark:bg-purple-900/50"
-                          : block.type === "break"
-                            ? (block.fixedBreakId ? "border-teal-400 text-teal-600 bg-teal-50 dark:border-teal-600 dark:text-teal-300 dark:bg-teal-900/50" : "border-green-400 text-green-600 bg-green-50 dark:border-green-600 dark:text-green-300 dark:bg-green-900/50")
-                          : block.type === "plan" ? "border-amber-400 text-amber-600 bg-amber-50 dark:border-amber-600 dark:text-amber-300 dark:bg-amber-900/50"
-                          : block.type === "personal" ? "border-pink-400 text-pink-600 bg-pink-50 dark:border-pink-600 dark:text-pink-300 dark:bg-pink-900/50"
-                          : "border-gray-400 text-gray-600 bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:bg-gray-900/50",
-                        )}
-                      >
-                        {block.fixedBreakId ? `固定${typeDisplay}` : typeDisplay}
-                  </Badge>
-
-                  <div className="flex items-center space-x-1">
-                        {block.taskId && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            title="启动专注"
-                            onClick={() => handleStartPomodoroForBlock(block.taskId, block.title)}
-                          >
-                            <Play className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                              <MoreHorizontal className="h-3.5 w-3.5" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenEditModal(block)}>
-                              <Edit3 className="mr-2 h-4 w-4" /> 编辑
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-red-600 hover:!text-red-600 focus:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/50 focus:!bg-red-50 dark:focus:!bg-red-900/50"
-                              onClick={() => handleDeleteBlock(block.id, block.title)}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" /> 删除
-                            </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              </div>
+          <DndContext sensors={dndSensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <div className="relative pt-2">
+              <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-muted rounded-full" style={{ height: 'calc(100% - 1rem)' }} ></div> {/* Adjust height if needed */}
+              {timeBlocks.map((block) => (
+                <DraggableTimelineBlock
+                  key={block.id}
+                  block={block}
+                  activeDndId={activeDndId}
+                  onPomodoroClick={handleStartPomodoroForBlock}
+                  handleOpenEditModal={handleOpenEditModal}
+                  handleDeleteBlock={handleDeleteBlock}
+                  getIconForType={getIconForType}
+                  getDisplayType={getDisplayType}
+                  currentTime={currentTime}
+                />
+              ))}
             </div>
-              )
-            })}
-        </div>
+          </DndContext>
         )}
       </CardContent>
       <CardFooter className="pt-2 border-t sticky bottom-0 bg-card">
-        <Button variant="outline" size="sm" className="w-full" onClick={handleOpenAddModal}>
+        <Button variant="outline" size="sm" className="w-full" onClick={handleOpenAddModal} disabled={loading}>
           <PlusCircle className="mr-2 h-4 w-4" /> 添加时间块
         </Button>
       </CardFooter>
@@ -671,6 +916,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 value={modalFormData.startTime}
                 onChange={handleModalFormChange}
                 className="col-span-3"
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && modalFormData.type === 'break')}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
@@ -682,6 +928,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 value={modalFormData.endTime}
                 onChange={handleModalFormChange}
                 className="col-span-3"
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && modalFormData.type === 'break')}
               />
             </div>
           </div>
@@ -695,5 +942,5 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         </DialogContent>
       </Dialog>
     </Card>
-  )
+  );
 } 

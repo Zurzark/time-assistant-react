@@ -1,68 +1,105 @@
-import { Task as DBTaskType } from "./db";
+import { Task as DBTaskType } from "@/lib/db";
 
-// Constant for no project selection in Select components
-export const NO_PROJECT_VALUE = "__NONE__";
+export type TaskPriority = "important-urgent" | "important-not-urgent" | "not-important-urgent" | "not-important-not-urgent";
 
-// Frontend Task Interface
 export interface Task {
   id: number;
   title: string;
   description?: string;
-  completed: boolean;
-  priority: "important-urgent" | "important-not-urgent" | "not-important-urgent" | "not-important-not-urgent";
-  dueDate?: Date;
+  priority: TaskPriority;
   projectId?: number;
-  tags?: string[];
-  subtasks?: { id: number; title: string; completed: boolean }[];
-  isFrog?: boolean;
+  completed: boolean;
+  isFrog: boolean;
+  tags: string[];
+  dueDate?: Date;
+  subtasks: { id: number; title: string; completed: boolean }[];
+  estimatedPomodoros?: number;
+  createdAt: Date; // 创建时间
+  completedAt?: Date; // 完成时间
 }
 
-// Priority mapping from Frontend Task to DBTaskType
-export const priorityMapToDB: Record<Task['priority'], DBTaskType['priority']> = {
+export const NO_PROJECT_VALUE = "NO_PROJECT";
+
+// Mapping from UI priority to DB priority string literal type
+export const priorityMapToDB: Record<TaskPriority, NonNullable<DBTaskType['priority']>> = {
   "important-urgent": "importantUrgent",
   "important-not-urgent": "importantNotUrgent",
   "not-important-urgent": "notImportantUrgent",
   "not-important-not-urgent": "notImportantNotUrgent",
 };
 
-// Priority mapping from DBTaskType to Frontend Task
-export const priorityMapFromDB: Record<string, Task['priority']> = {
+// Mapping from DB priority string literal type to UI priority
+export const priorityMapFromDB: Record<NonNullable<DBTaskType['priority']>, TaskPriority> = {
   importantUrgent: "important-urgent",
   importantNotUrgent: "important-not-urgent",
   notImportantUrgent: "not-important-urgent",
   notImportantNotUrgent: "not-important-not-urgent",
 };
 
-// Converts a partial Frontend Task to a shape suitable for DBTaskType (excluding DB-generated fields)
-export const toDBTaskShape = (task: Partial<Task>): Partial<Omit<DBTaskType, 'id' | 'createdAt' | 'updatedAt' | 'isDeleted' | 'deletedAt' | 'completedAt'>> => {
-  const dbTaskShape: Partial<Omit<DBTaskType, 'id' | 'createdAt' | 'updatedAt' | 'isDeleted' | 'deletedAt' | 'completedAt'>> = {
-    title: task.title,
-    description: task.description,
-    completed: task.completed === undefined ? undefined : (task.completed ? 1 : 0) as DBTaskType['completed'],
-    priority: task.priority ? priorityMapToDB[task.priority] : undefined,
-    dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-    projectId: task.projectId,
-    tags: task.tags,
-    subtasks: task.subtasks?.map(st => ({ title: st.title, completed: st.completed ? 1 : 0 })),
-    isFrog: task.isFrog === undefined ? undefined : (task.isFrog ? 1 : 0) as DBTaskType['isFrog'],
+export const fromDBTaskShape = (dbTask: DBTaskType): Task => {
+  if (!dbTask || typeof dbTask.id === 'undefined') {
+    console.error("Invalid dbTask provided to fromDBTaskShape:", dbTask);
+    throw new Error("Invalid dbTask provided to fromDBTaskShape");
+  }
+  return {
+    id: dbTask.id,
+    title: dbTask.title,
+    description: dbTask.description || "",
+    priority: priorityMapFromDB[dbTask.priority || 'notImportantNotUrgent'],
+    projectId: dbTask.projectId,
+    completed: dbTask.completed === 1,
+    isFrog: dbTask.isFrog === 1,
+    tags: dbTask.tags || [],
+    dueDate: dbTask.dueDate ? new Date(dbTask.dueDate) : undefined,
+    subtasks: dbTask.subtasks?.map((st, index) => ({
+      id: index, 
+      title: st.title,
+      completed: st.completed === 1,
+    })) || [],
+    estimatedPomodoros: dbTask.estimatedPomodoros,
+    createdAt: new Date(dbTask.createdAt),
+    completedAt: dbTask.completedAt ? new Date(dbTask.completedAt) : undefined,
   };
-  // Remove undefined keys to prevent overwriting existing DB fields with undefined
-  Object.keys(dbTaskShape).forEach(key => (dbTaskShape as any)[key] === undefined && delete (dbTaskShape as any)[key]);
-  return dbTaskShape;
 };
 
-// Converts a DBTaskType to a Frontend Task
-export const fromDBTaskShape = (dbTask: DBTaskType): Task => {
-  return {
-    id: dbTask.id!,
-    title: dbTask.title,
-    description: dbTask.description,
-    completed: !!dbTask.completed,
-    priority: dbTask.priority ? (priorityMapFromDB[dbTask.priority as string] || "not-important-not-urgent") : "not-important-not-urgent",
-    dueDate: dbTask.dueDate ? new Date(dbTask.dueDate) : undefined,
-    projectId: dbTask.projectId,
-    tags: dbTask.tags,
-    subtasks: dbTask.subtasks?.map((st, index) => ({ id: index, title: st.title, completed: !!(st as any).completed })),
-    isFrog: !!dbTask.isFrog,
-  };
+export const toDBTaskShape = (task: Partial<Task>): Partial<Omit<DBTaskType, 'id' | 'createdAt' | 'updatedAt'>> => {
+  const dbShape: Partial<Omit<DBTaskType, 'id' | 'createdAt' | 'updatedAt'>> = {};
+
+  if (task.hasOwnProperty('title') && typeof task.title === 'string') dbShape.title = task.title;
+  if (task.hasOwnProperty('description') && typeof task.description === 'string') dbShape.description = task.description;
+  if (task.priority) dbShape.priority = priorityMapToDB[task.priority];
+  
+  if (typeof task.completed === 'boolean') {
+    dbShape.completed = task.completed ? 1 : 0;
+    if (task.hasOwnProperty('completedAt')) {
+      dbShape.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
+    } else if (task.completed) {
+      // If task is marked complete and completedAt is not given, set to now.
+      // This aligns with toggleTaskCompletion implicitly setting to now.
+      dbShape.completedAt = new Date(); 
+    } else {
+      // If task is marked incomplete, completedAt must be undefined.
+      dbShape.completedAt = undefined; 
+    }
+  } else if (task.hasOwnProperty('completedAt')) {
+    // If completed status is not changing, but completedAt is explicitly provided (e.g. null)
+     dbShape.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
+  }
+
+  if (typeof task.isFrog === 'boolean') dbShape.isFrog = task.isFrog ? 1 : 0;
+  if (task.tags) dbShape.tags = task.tags;
+  if (task.hasOwnProperty('dueDate')) dbShape.dueDate = task.dueDate ? new Date(task.dueDate) : undefined;
+  
+  if (task.hasOwnProperty('projectId')) {
+    dbShape.projectId = task.projectId; 
+  }
+
+  if (task.subtasks) {
+    dbShape.subtasks = task.subtasks.map(st => ({ title: st.title, completed: (st.completed ? 1 : 0) as (0|1) }));
+  }
+  if (task.hasOwnProperty('estimatedPomodoros')) {
+    dbShape.estimatedPomodoros = task.estimatedPomodoros;
+  }
+  
+  return dbShape;
 }; 

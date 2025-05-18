@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Frown, Loader2, MoreHorizontal, Timer } from "lucide-react"
+import { Frown, Loader2, MoreHorizontal, Timer, CalendarDays } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -12,6 +12,9 @@ import { FrogTaskModal } from "../task/frog-task-modal" // 调整导入路径
 import { EditTaskModal } from "../task/edit-task-modal" // 调整导入路径
 import { DeleteTaskConfirm } from "../task/delete-task-confirm" // 调整导入路径
 // 注意: @/lib/db 的导入是动态的，将在组件内部处理
+import { getAll as getAllDB, add as addDB, ObjectStores as DBObjectStores, type TimeBlock as DBTimeBlock, type Task as DBTask } from "@/lib/db";
+// 从 lib/utils.ts 导入共享函数
+import { formatTimeForDisplay, checkTimeOverlap } from "@/lib/utils";
 
 interface FrogTasksCardProps {
   onPomodoroClick: (taskId: string, taskTitle: string) => void;
@@ -21,7 +24,7 @@ export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
   const { updateTaskStats, addTasks: _addTasksToStats, removeTasks } = useTaskStats()
 
   // 状态管理
-  const [tasks, setTasks] = useState<Array<{id: string | number, title: string, completed: boolean}>>([])
+  const [tasks, setTasks] = useState<Array<{id: string | number, title: string, completed: boolean, isFrog?: 0 | 1, estimatedPomodoros?: number}>>([])
   const [loading, setLoading] = useState(true)
   const [frogTaskModalOpen, setFrogTaskModalOpen] = useState(false)
   const [editTaskModalOpen, setEditTaskModalOpen] = useState(false)
@@ -100,10 +103,116 @@ export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
   }
 
   // 处理添加到时间轴
-  const handleAddToTimeline = (taskId: string | number) => {
-    // 这里应实现将任务添加到时间轴的逻辑
-    console.log(`将任务 ${taskId} 添加到时间轴`)
-  }
+  const handleAddToTimeline = async (taskItem: { id: string | number; title: string; estimatedPomodoros?: number }) => {
+    if (!taskItem.id) {
+      alert("任务ID无效，无法添加到时间轴。");
+      return;
+    }
+    try {
+      const todayString = new Date().toISOString().split('T')[0];
+      const todayDateObj = new Date(todayString + 'T00:00:00Z');
+
+      const taskId = String(taskItem.id);
+      const title = taskItem.title;
+      const type = 'task';
+      const date = todayString;
+
+      let durationMinutes = 60; 
+      if (taskItem.estimatedPomodoros && taskItem.estimatedPomodoros > 0) {
+        durationMinutes = taskItem.estimatedPomodoros * 25; 
+      }
+      const durationMilliseconds = durationMinutes * 60 * 1000;
+
+      const existingDbBlocks = await getAllDB<DBTimeBlock>(DBObjectStores.TIME_BLOCKS);
+      const todayBlocks = existingDbBlocks
+        .filter(block => block.date === todayString && block.id !== undefined)
+        .map(block => ({
+          ...block,
+          startTime: new Date(block.startTime),
+          endTime: new Date(block.endTime),
+        }))
+        .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+
+      let proposedStartTime: Date | null = null;
+      let proposedEndTime: Date | null = null;
+      
+      const now = new Date();
+      const localTodayDateObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const earliestPossibleStart = new Date(localTodayDateObj);
+      earliestPossibleStart.setHours(7, 0, 0, 0); 
+      let searchStart = now > earliestPossibleStart ? new Date(now.getTime()) : new Date(earliestPossibleStart.getTime());
+      
+      const minutes = searchStart.getMinutes();
+      const remainder = minutes % 5;
+      if (remainder !== 0) {
+        searchStart.setMinutes(minutes + (5 - remainder), 0, 0);
+      }
+
+      let slotFound = false;
+      const MIN_GAP_MINUTES = 5; 
+      const MAX_ITERATIONS = 100; 
+      let iterations = 0;
+
+      while(!slotFound && iterations < MAX_ITERATIONS) {
+        iterations++;
+        let currentProposedStart = new Date(searchStart);
+        let currentProposedEnd = new Date(currentProposedStart.getTime() + durationMilliseconds);
+        let overlap = false;
+        for (const block of todayBlocks) {
+          if (checkTimeOverlap(currentProposedStart, currentProposedEnd, block.startTime, block.endTime, MIN_GAP_MINUTES)) {
+            overlap = true;
+            searchStart = new Date(block.endTime.getTime() + MIN_GAP_MINUTES * 60 * 1000);
+            const currentMinutesLoop = searchStart.getMinutes();
+            const currentRemainderLoop = currentMinutesLoop % 5;
+            if (currentRemainderLoop !== 0) {
+              searchStart.setMinutes(currentMinutesLoop + (5 - currentRemainderLoop), 0, 0);
+            }
+            break;
+          }
+        }
+
+        if (!overlap) {
+          const endOfDayLimit = new Date(localTodayDateObj);
+          endOfDayLimit.setHours(22, 0, 0, 0); 
+          if (currentProposedEnd > endOfDayLimit) {
+            alert(`未能为任务 "${title}" 找到今天 ${durationMinutes} 分钟的合适时段（已到${formatTimeForDisplay(endOfDayLimit)}）。请尝试缩短任务时长或手动在时间轴上安排。`);
+            return;
+          }
+          proposedStartTime = currentProposedStart;
+          proposedEndTime = currentProposedEnd;
+          slotFound = true;
+        }
+      }
+      
+      if (!slotFound || !proposedStartTime || !proposedEndTime) { 
+          alert(`无法为任务 "${title}" 自动找到 ${durationMinutes} 分钟的空闲时间段。请尝试手动安排或检查当天日程。`);
+          return;
+      }
+
+      const newTimeBlock: Omit<DBTimeBlock, 'id'> = {
+        taskId: taskId,
+        title: title,
+        type: type,
+        startTime: proposedStartTime,
+        endTime: proposedEndTime,
+        date: proposedStartTime.toISOString().split('T')[0],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await addDB(DBObjectStores.TIME_BLOCKS, newTimeBlock);
+      window.dispatchEvent(new CustomEvent('timelineShouldUpdate'));
+      alert(`任务 "${title}" 已添加到今日时间轴 ${formatTimeForDisplay(proposedStartTime)} - ${formatTimeForDisplay(proposedEndTime)}。`);
+
+    } catch (error) {
+      console.error("添加到时间轴时出错:", error);
+      let errorMessage = "添加到时间轴时发生未知错误。";
+      if (error instanceof Error) {
+        errorMessage = `添加到时间轴失败: ${error.message}`;
+      }
+      alert(errorMessage);
+    }
+  };
 
   // 处理删除任务
   const handleDeleteTask = (taskId: string | number, taskTitle: string) => {
@@ -233,8 +342,8 @@ export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
                     <DropdownMenuItem onClick={() => handleEditTask(task.id, task.title)}>
                       编辑
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleAddToTimeline(task.id)}>
-                      添加到时间轴
+                    <DropdownMenuItem onClick={() => handleAddToTimeline(task)}>
+                       <CalendarDays className="mr-2 h-4 w-4" /> 添加到时间轴
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       className="text-red-500"

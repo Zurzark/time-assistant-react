@@ -21,6 +21,7 @@ import {
   Timer,
   Trash2,
   ArrowUpLeft,
+  CalendarDays,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -53,11 +54,12 @@ import { CalendarIcon } from "@radix-ui/react-icons"
 import { format } from "date-fns"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { PomodoroModal } from "@/components/pomodoro/pomodoro-modal"
-import { ObjectStores, add, get, update, remove, getAll, getByIndex, Task as DBTaskType, Project as DBProjectType, Tag as DBTagType } from "@/lib/db"
+import { ObjectStores, add, get, update, remove, getAll, getByIndex, Task as DBTaskType, Project as DBProjectType, Tag as DBTagType, TimeBlock as DBTimeBlockType } from "@/lib/db"
 import { Loader2 } from "lucide-react"
 import { EditTaskDialog } from "./edit-task-dialog"
 import { TrashView } from "../views/trash-view"
 import { ConfirmationDialog } from "../common/confirmation-dialog"
+import { formatTimeForDisplay, checkTimeOverlap } from "@/lib/utils"
 import {
   NO_PROJECT_VALUE,
   Task,
@@ -153,7 +155,7 @@ export function TasksView() {
       // Sort by deletedAt descending, then by updatedAt or createdAt as fallback
       dbDeletedTasks.sort((a, b) => {
         const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : (a.updatedAt ? new Date(a.updatedAt).getTime() : new Date(a.createdAt).getTime());
-        const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : (b.updatedAt ? new Date(b.updatedAt).getTime() : new Date(b.createdAt).getTime());
+        const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : (b.updatedAt ? new Date(b.updatedAt).getTime() : new Date(a.createdAt).getTime());
         return dateB - dateA;
       });
       setDeletedTasks(dbDeletedTasks);
@@ -321,6 +323,12 @@ export function TasksView() {
       return a.dueDate.getTime() - b.dueDate.getTime()
     } else if (sortBy === "alphabetical") {
       return a.title.localeCompare(b.title)
+    } else if (sortBy === "createdAt-asc") {
+      // Sort by creation date, oldest first. createdAt should always exist.
+      return (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0);
+    } else if (sortBy === "createdAt-desc") {
+      // Sort by creation date, newest first. createdAt should always exist.
+      return (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0);
     } else {
       return 0
     }
@@ -416,7 +424,7 @@ export function TasksView() {
         isDeleted: 0, 
         deletedAt: undefined,
         goalId: undefined,
-        estimatedPomodoros: undefined,
+        estimatedPomodoros: newTask.estimatedPomodoros, // Ensure this is passed if present in newTask
         actualPomodoros: undefined,
         reminderDate: undefined,
         recurrenceRule: undefined,
@@ -445,6 +453,7 @@ export function TasksView() {
           isFrog: false,
           tags: [],
           dueDate: undefined,
+          estimatedPomodoros: undefined, // Reset this field too
         });
         setIsCreateDialogOpen(false);
       } catch (err) {
@@ -484,6 +493,7 @@ export function TasksView() {
         isFrog: updatedTaskData.isFrog ? 1 : 0,
         tags: processedTags, // Use the processed tags
         updatedAt: new Date(),
+        estimatedPomodoros: updatedTaskData.estimatedPomodoros, // Ensure this is updated
       };
       
       // Remove undefined keys that might have been introduced by spreading updatedTaskData if it was partial
@@ -603,6 +613,125 @@ export function TasksView() {
       loadDeletedTasks(); // Revert optimistic update
     }
   }, [taskToPermanentlyDeleteId, loadDeletedTasks]);
+
+  // 新增：处理添加到时间轴的函数
+  const handleAddTaskToTimeline = async (taskItem: Task) => {
+    if (taskItem.id === undefined) {
+      alert("任务ID无效，无法添加到时间轴。");
+      return;
+    }
+    // 检查任务是否已完成
+    if (taskItem.completed) {
+      alert(`任务 "${taskItem.title}" 已完成，无法直接添加到时间轴。如需安排，请先将其标记为未完成。`);
+      return;
+    }
+
+    try {
+      const todayString = new Date().toISOString().split('T')[0];
+      const taskId = String(taskItem.id);
+      const title = taskItem.title;
+      const type = 'task';
+
+      let durationMinutes = 60; // 默认时长
+      // 假设 Task 类型有 estimatedPomodoros 字段
+      if (taskItem.estimatedPomodoros && taskItem.estimatedPomodoros > 0) {
+        durationMinutes = taskItem.estimatedPomodoros * 25; 
+      }
+      const durationMilliseconds = durationMinutes * 60 * 1000;
+
+      const existingDbBlocks = await getAll<DBTimeBlockType>(ObjectStores.TIME_BLOCKS);
+      const todayBlocks = existingDbBlocks
+        .filter(block => block.date === todayString && block.id !== undefined)
+        .map(block => ({
+          ...block,
+          startTime: new Date(block.startTime),
+          endTime: new Date(block.endTime),
+        }))
+        .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+
+      let proposedStartTime: Date | null = null;
+      let proposedEndTime: Date | null = null;
+      
+      const now = new Date();
+      const localTodayDateObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const earliestPossibleStart = new Date(localTodayDateObj);
+      earliestPossibleStart.setHours(7, 0, 0, 0); 
+      let searchStart = now > earliestPossibleStart ? new Date(now.getTime()) : new Date(earliestPossibleStart.getTime());
+      
+      const minutes = searchStart.getMinutes();
+      const remainder = minutes % 5;
+      if (remainder !== 0) {
+        searchStart.setMinutes(minutes + (5 - remainder), 0, 0);
+      }
+
+      let slotFound = false;
+      const MIN_GAP_MINUTES = 5; 
+      const MAX_ITERATIONS = 100; 
+      let iterations = 0;
+
+      while(!slotFound && iterations < MAX_ITERATIONS) {
+        iterations++;
+        let currentProposedStart = new Date(searchStart);
+        let currentProposedEnd = new Date(currentProposedStart.getTime() + durationMilliseconds);
+        let overlap = false;
+        for (const block of todayBlocks) {
+          // 使用导入的 checkTimeOverlap (替换本地的 doTaskTimeRangesOverlap)
+          if (checkTimeOverlap(currentProposedStart, currentProposedEnd, block.startTime, block.endTime, MIN_GAP_MINUTES)) {
+            overlap = true;
+            searchStart = new Date(block.endTime.getTime() + MIN_GAP_MINUTES * 60 * 1000);
+            const currentMinutesLoop = searchStart.getMinutes();
+            const currentRemainderLoop = currentMinutesLoop % 5;
+            if (currentRemainderLoop !== 0) {
+              searchStart.setMinutes(currentMinutesLoop + (5 - currentRemainderLoop), 0, 0);
+            }
+            break;
+          }
+        }
+
+        if (!overlap) {
+          const endOfDayLimit = new Date(localTodayDateObj);
+          endOfDayLimit.setHours(22, 0, 0, 0); 
+           // 使用导入的 formatTimeForDisplay (替换本地的 formatDisplayTime)
+          if (currentProposedEnd > endOfDayLimit) {
+            alert(`未能为任务 "${title}" 找到今天 ${durationMinutes} 分钟的合适时段（已到${formatTimeForDisplay(endOfDayLimit)}）。请尝试缩短任务时长或手动在时间轴上安排。`);
+            return;
+          }
+          proposedStartTime = currentProposedStart;
+          proposedEndTime = currentProposedEnd;
+          slotFound = true;
+        }
+      }
+      
+      if (!slotFound || !proposedStartTime || !proposedEndTime) { 
+          alert(`无法为任务 "${title}" 自动找到 ${durationMinutes} 分钟的空闲时间段。请尝试手动安排或检查当天日程。`);
+          return;
+      }
+
+      const newTimeBlock: Omit<DBTimeBlockType, 'id'> = {
+        taskId: taskId,
+        title: title,
+        type: type,
+        startTime: proposedStartTime,
+        endTime: proposedEndTime,
+        date: proposedStartTime.toISOString().split('T')[0],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await add(ObjectStores.TIME_BLOCKS, newTimeBlock);
+      window.dispatchEvent(new CustomEvent('timelineShouldUpdate'));
+      // 使用导入的 formatTimeForDisplay (替换本地的 formatDisplayTime)
+      alert(`任务 "${title}" 已添加到今日时间轴 ${formatTimeForDisplay(proposedStartTime)} - ${formatTimeForDisplay(proposedEndTime)}。`);
+
+    } catch (error) {
+      console.error("添加到时间轴时出错:", error);
+      let errorMessage = "添加到时间轴时发生未知错误。";
+      if (error instanceof Error) {
+        errorMessage = `添加到时间轴失败: ${error.message}`;
+      }
+      alert(errorMessage);
+    }
+  };
 
   if (loading && tasks.length === 0) { // Show full page loader only on initial load
     return (
@@ -759,6 +888,17 @@ export function TasksView() {
                       onChange={(e) => setNewTask({ ...newTask, tags: e.target.value.split(",").map(tag => tag.trim()).filter(tag => tag) })}
                     />
                   </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="estimatedPomodoros-create">预估番茄钟</Label>
+                  <Input
+                    id="estimatedPomodoros-create"
+                    type="number"
+                    placeholder="例如: 2"
+                    value={newTask.estimatedPomodoros || ""}
+                    onChange={(e) => setNewTask({ ...newTask, estimatedPomodoros: e.target.value ? parseInt(e.target.value, 10) : undefined })}
+                    min="0"
+                  />
                 </div>
                 <div className="flex items-center space-x-2 mt-2">
                   <Checkbox 
@@ -951,7 +1091,7 @@ export function TasksView() {
                             ? "等待中"
                             : "所有任务"}
                   </CardTitle>
-                  <Badge variant="outline">{sortedTasks.length}</Badge>
+                  <Badge variant="outline">{selectedView === "trash" ? deletedTasks.length : sortedTasks.length}</Badge>
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="relative">
@@ -974,6 +1114,9 @@ export function TasksView() {
                       <DropdownMenuItem onClick={() => setSortBy("priority")}>按优先级排序</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setSortBy("dueDate")}>按截止日期排序</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setSortBy("alphabetical")}>按字母顺序排序</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setSortBy("createdAt-desc")}>按创建时间 (新优先)</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setSortBy("createdAt-asc")}>按创建时间 (旧优先)</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <div className="flex items-center border rounded-md">
@@ -1066,8 +1209,8 @@ export function TasksView() {
                                     <Flag className="h-4 w-4 mr-2" />
                                     {task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem>
-                                    <Calendar className="h-4 w-4 mr-2" />
+                                  <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                    <CalendarDays className="h-4 w-4 mr-2" />
                                     添加到时间轴
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -1242,6 +1385,10 @@ export function TasksView() {
                                       <DropdownMenuContent align="end">
                                         <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                          <CalendarDays className="h-4 w-4 mr-2" />
+                                          添加到时间轴
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
@@ -1323,6 +1470,10 @@ export function TasksView() {
                                       <DropdownMenuContent align="end">
                                         <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                          <CalendarDays className="h-4 w-4 mr-2" />
+                                          添加到时间轴
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
@@ -1404,6 +1555,10 @@ export function TasksView() {
                                       <DropdownMenuContent align="end">
                                         <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                          <CalendarDays className="h-4 w-4 mr-2" />
+                                          添加到时间轴
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>
@@ -1485,6 +1640,10 @@ export function TasksView() {
                                       <DropdownMenuContent align="end">
                                         <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                          <CalendarDays className="h-4 w-4 mr-2" />
+                                          添加到时间轴
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => openDeleteConfirmDialog(task.id)} className="text-red-500 hover:!text-red-600">删除</DropdownMenuItem>
                                       </DropdownMenuContent>
                                     </DropdownMenu>

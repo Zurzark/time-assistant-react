@@ -25,8 +25,9 @@ import { format } from "date-fns"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 import { add, getAll, update, remove, ObjectStores, Goal as DBGoal, DBMilestone, getMilestonesByGoalId, addMilestone, updateMilestone, deleteMilestone } from "@/lib/db"
+import { GoalFormFields, GoalFormData } from "@/components/goal/GoalFormFields"
 
-interface Milestone {
+interface MilestoneViewItem {
   id: number;
   title: string;
   description?: string;
@@ -38,25 +39,25 @@ interface Milestone {
   updatedAt: Date;
 }
 
-interface Goal {
+interface GoalViewItem {
   id: number
   name: string
   description?: string
   goalMeaning?: string
-  dueDate?: Date
+  targetDate?: Date
   progress: number
   status: "active" | "completed" | "paused"
   createdAt: Date
   updatedAt: Date
 }
 
-const mapDBGoalToGoal = (dbGoal: DBGoal): Goal => {
+const mapDBGoalToGoalViewItem = (dbGoal: DBGoal): GoalViewItem => {
   return {
     id: dbGoal.id!,
     name: dbGoal.name,
     description: dbGoal.description,
     goalMeaning: dbGoal.goalMeaning,
-    dueDate: dbGoal.targetDate,
+    targetDate: dbGoal.targetDate ? new Date(dbGoal.targetDate) : undefined,
     progress: dbGoal.progress ?? 0,
     status: dbGoal.status === 'archived' ? 'paused' : dbGoal.status,
     createdAt: new Date(dbGoal.createdAt),
@@ -64,40 +65,36 @@ const mapDBGoalToGoal = (dbGoal: DBGoal): Goal => {
   }
 }
 
+const mapDBMilestoneToViewItem = (dbMilestone: DBMilestone): MilestoneViewItem => {
+  return {
+    ...dbMilestone,
+    id: dbMilestone.id!,
+    targetDate: dbMilestone.targetDate ? new Date(dbMilestone.targetDate) : undefined,
+    completedDate: dbMilestone.completedDate ? new Date(dbMilestone.completedDate) : undefined,
+    createdAt: new Date(dbMilestone.createdAt),
+    updatedAt: new Date(dbMilestone.updatedAt),
+  }
+}
+
 export function GoalsView() {
-  const [goals, setGoals] = useState<Goal[]>([])
+  const [goals, setGoals] = useState<GoalViewItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [newGoalForm, setNewGoalForm] = useState<Partial<Omit<DBGoal, 'id' | 'createdAt' | 'updatedAt'>>>({
-    name: "",
-    description: "",
-    goalMeaning: "",
-    status: "active",
-    progress: 0,
-  })
-  const [newGoalDate, setNewGoalDate] = useState<Date>()
 
-  const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null)
-  const [currentGoalMilestones, setCurrentGoalMilestones] = useState<Milestone[]>([])
+  const [selectedGoal, setSelectedGoal] = useState<GoalViewItem | null>(null)
+  const [currentGoalMilestones, setCurrentGoalMilestones] = useState<MilestoneViewItem[]>([])
   const [isLoadingMilestones, setIsLoadingMilestones] = useState(false)
 
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
-  const [editGoalDate, setEditGoalDate] = useState<Date | undefined>()
+  const [editingGoal, setEditingGoal] = useState<GoalViewItem | null>(null)
 
-  // New state for Milestone C(R)UD
   const [isMilestoneDialogOpen, setIsMilestoneDialogOpen] = useState(false)
-  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null)
+  const [editingMilestone, setEditingMilestone] = useState<MilestoneViewItem | null>(null)
   const [currentGoalIdForMilestone, setCurrentGoalIdForMilestone] = useState<number | null>(null)
-  const [milestoneForm, setMilestoneForm] = useState<Partial<Omit<DBMilestone, 'id' | 'createdAt' | 'updatedAt' | 'goalId'>>>({
-    title: "",
-    description: "",
-    status: "pending",
-    targetDate: undefined,
-  })
+  const [milestoneForm, setMilestoneForm] = useState<Partial<Omit<DBMilestone, 'id' | 'createdAt' | 'updatedAt' | 'goalId'>>>({ title: "", description: "", status: "pending", targetDate: undefined, })
   const [milestoneTargetDate, setMilestoneTargetDate] = useState<Date | undefined>()
 
   const fetchGoals = useCallback(async () => {
@@ -105,7 +102,7 @@ export function GoalsView() {
     setError(null)
     try {
       const dbGoals = await getAll<DBGoal>(ObjectStores.GOALS)
-      setGoals(dbGoals.map(mapDBGoalToGoal).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
+      setGoals(dbGoals.map(mapDBGoalToGoalViewItem).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
     } catch (err) {
       console.error("Failed to fetch goals:", err)
       setError("无法加载目标数据。请稍后重试。")
@@ -118,86 +115,66 @@ export function GoalsView() {
     fetchGoals()
   }, [fetchGoals])
 
-  const handleCreateGoal = async () => {
-    if (newGoalForm.name?.trim()) {
-      const now = new Date();
-      const goalToSave: Omit<DBGoal, 'id'> = {
-        name: newGoalForm.name!,
-        description: newGoalForm.description || undefined,
-        goalMeaning: newGoalForm.goalMeaning || undefined,
-        targetDate: newGoalDate,
-        progress: newGoalForm.progress || 0,
-        status: newGoalForm.status || "active",
-        createdAt: now,
-        updatedAt: now,
-      };
+  const handleCreateGoal = async (formData: GoalFormData) => {
+    const now = new Date();
+    const goalToSave: Omit<DBGoal, 'id'> = {
+      name: formData.name,
+      description: formData.description || undefined,
+      goalMeaning: formData.goalMeaning || undefined,
+      targetDate: formData.targetDate,
+      progress: 0,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
 
-      try {
-        await add<Omit<DBGoal, 'id'>>(ObjectStores.GOALS, goalToSave)
-        setNewGoalForm({ name: "", description: "", goalMeaning: "", status: "active", progress: 0 }) 
-        setNewGoalDate(undefined)
-        setIsCreateDialogOpen(false)
-        fetchGoals()
-      } catch (err) {
-        console.error("Failed to create goal:", err)
-        setError("创建目标失败。")
-      }
+    try {
+      await add<Omit<DBGoal, 'id'>>(ObjectStores.GOALS, goalToSave)
+      setIsCreateDialogOpen(false)
+      fetchGoals()
+    } catch (err) {
+      console.error("Failed to create goal:", err)
+      setError("创建目标失败。请稍后重试。")
     }
   }
   
-  const openEditDialog = async (goal: Goal) => {
+  const openEditDialog = async (goal: GoalViewItem) => {
     setSelectedGoal(null); 
     setIsDetailDialogOpen(false); 
     setEditingGoal(goal);
-    setNewGoalForm({
-      name: goal.name,
-      description: goal.description,
-      goalMeaning: goal.goalMeaning, 
-      status: goal.status,
-      progress: goal.progress,
-    });
-    setEditGoalDate(goal.dueDate);
     setIsEditDialogOpen(true);
     if (goal?.id) {
       await fetchMilestonesForGoal(goal.id);
     }
   };
 
-  const handleUpdateGoal = async () => {
-    if (!editingGoal || !newGoalForm.name?.trim()) {
-      setError("目标名称不能为空。");
+  const handleUpdateGoal = async (formData: GoalFormData) => {
+    if (!editingGoal) {
+      setError("没有选中的目标进行更新。");
       return;
     }
 
     const now = new Date();
     const updatedDBGoal: DBGoal = {
       id: editingGoal.id,
-      name: newGoalForm.name!,
-      description: newGoalForm.description || undefined,
-      goalMeaning: newGoalForm.goalMeaning || undefined,
-      targetDate: editGoalDate,
-      progress: newGoalForm.progress ?? editingGoal.progress,
-      status: newGoalForm.status ?? editingGoal.status,
-      createdAt: editingGoal.createdAt, 
+      name: formData.name,
+      description: formData.description || undefined,
+      goalMeaning: formData.goalMeaning || undefined,
+      targetDate: formData.targetDate,
+      progress: editingGoal.progress,
+      status: editingGoal.status,
+      createdAt: editingGoal.createdAt,
       updatedAt: now,
     };
     
-    if (typeof updatedDBGoal.id !== 'number') {
-        setError("目标ID无效，无法更新。");
-        console.error("Invalid goal ID for update:", updatedDBGoal.id);
-        return;
-    }
-
     try {
       await update<DBGoal>(ObjectStores.GOALS, updatedDBGoal);
-      setEditingGoal(null);
       setIsEditDialogOpen(false);
-      setNewGoalForm({ name: "", description: "", goalMeaning: "", status: "active", progress: 0 }); 
-      setEditGoalDate(undefined);
+      setEditingGoal(null);
       fetchGoals();
     } catch (err) {
       console.error("Failed to update goal:", err);
-      setError("更新目标失败。");
+      setError("更新目标失败。请稍后重试。");
     }
   };
 
@@ -212,13 +189,17 @@ export function GoalsView() {
         setIsDetailDialogOpen(false);
         setSelectedGoal(null);
       }
+      if (editingGoal && editingGoal.id === goalId) {
+        setIsEditDialogOpen(false);
+        setEditingGoal(null);
+      }
     } catch (err) {
       console.error("Failed to delete goal:", err)
       setError("删除目标失败。")
     }
   }
 
-  const openGoalDetails = async (goal: Goal) => {
+  const openGoalDetails = async (goal: GoalViewItem) => {
     setEditingGoal(null); 
     setIsEditDialogOpen(false); 
     setSelectedGoal(goal)
@@ -230,7 +211,7 @@ export function GoalsView() {
     }
   }
 
-  const getStatusColor = (status: Goal["status"]) => {
+  const getStatusColor = (status: GoalViewItem["status"]) => {
     switch (status) {
       case "active":
         return "bg-green-500"
@@ -243,7 +224,7 @@ export function GoalsView() {
     }
   }
 
-  const getStatusText = (status: Goal["status"]) => {
+  const getStatusText = (status: GoalViewItem["status"]) => {
     switch (status) {
       case "active":
         return "进行中"
@@ -260,7 +241,7 @@ export function GoalsView() {
     setIsLoadingMilestones(true);
     try {
       const dbMilestones = await getMilestonesByGoalId(goalId);
-      setCurrentGoalMilestones(dbMilestones.map(m => ({...m, id: m.id! })));
+      setCurrentGoalMilestones(dbMilestones.map(mapDBMilestoneToViewItem));
     } catch (err) {
       console.error(`Failed to fetch milestones for goal ${goalId}:`, err);
     } finally {
@@ -277,7 +258,7 @@ export function GoalsView() {
     }
   }, [isDetailDialogOpen, isEditDialogOpen]);
 
-  const getMilestoneStatusIcon = (status: Milestone['status']) => {
+  const getMilestoneStatusIcon = (status: MilestoneViewItem['status']) => {
     switch (status) {
       case 'pending': return <ListTodo className="h-4 w-4 text-gray-500" />;
       case 'inProgress': return <Zap className="h-4 w-4 text-blue-500" />;
@@ -287,7 +268,7 @@ export function GoalsView() {
     }
   };
 
-  const getMilestoneStatusText = (status: Milestone['status']) => {
+  const getMilestoneStatusText = (status: MilestoneViewItem['status']) => {
     const map = {
         'pending': '待处理',
         'inProgress': '进行中',
@@ -315,7 +296,7 @@ export function GoalsView() {
     setIsMilestoneDialogOpen(true);
   };
 
-  const openEditMilestoneDialog = (milestone: Milestone, goalId: number) => {
+  const openEditMilestoneDialog = (milestone: MilestoneViewItem, goalId: number) => {
     resetMilestoneForm();
     setEditingMilestone(milestone);
     setCurrentGoalIdForMilestone(goalId);
@@ -341,7 +322,7 @@ export function GoalsView() {
         ...editingMilestone,
         id: editingMilestone.id,
         goalId: currentGoalIdForMilestone,
-        title: milestoneForm.title,
+        title: milestoneForm.title!,
         description: milestoneForm.description || undefined,
         status: milestoneForm.status || 'pending',
         targetDate: milestoneTargetDate,
@@ -360,7 +341,7 @@ export function GoalsView() {
     } else {
       const milestoneToCreate: Omit<DBMilestone, 'id'> = {
         goalId: currentGoalIdForMilestone,
-        title: milestoneForm.title,
+        title: milestoneForm.title!,
         description: milestoneForm.description || undefined,
         status: milestoneForm.status || 'pending',
         targetDate: milestoneTargetDate,
@@ -390,6 +371,13 @@ export function GoalsView() {
       setError("删除里程碑失败。");
     }
   };
+
+  const editFormInitialData: Partial<GoalFormData> | undefined = editingGoal ? {
+    name: editingGoal.name,
+    description: editingGoal.description,
+    goalMeaning: editingGoal.goalMeaning,
+    targetDate: editingGoal.targetDate,
+  } : undefined;
 
   if (isLoading) {
     return (
@@ -431,58 +419,14 @@ export function GoalsView() {
                 <DialogTitle>创建新目标</DialogTitle>
                 <DialogDescription>设定一个新的长期目标</DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="name">目标名称</Label>
-                  <Input
-                    id="name"
-                    placeholder="输入目标名称"
-                    value={newGoalForm.name}
-                    onChange={(e) => setNewGoalForm({ ...newGoalForm, name: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="description">描述</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="输入目标描述（可选）"
-                    value={newGoalForm.description}
-                    onChange={(e) => setNewGoalForm({ ...newGoalForm, description: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="goalMeaning">目标意义</Label>
-                  <Textarea
-                    id="goalMeaning"
-                    placeholder="阐述这个目标对您的意义（可选）"
-                    value={newGoalForm.goalMeaning}
-                    onChange={(e) => setNewGoalForm({ ...newGoalForm, goalMeaning: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="dueDate">期望完成日期</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant={"outline"}
-                        className={cn("w-full justify-start text-left font-normal", !newGoalDate && "text-muted-foreground")}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {newGoalDate ? format(newGoalDate, "PPP") : <span>选择日期（可选）</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <CalendarComponent mode="single" selected={newGoalDate} onSelect={setNewGoalDate} initialFocus />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => {setIsCreateDialogOpen(false); setNewGoalForm({ name: "", description: "", goalMeaning: "", status: "active", progress: 0 }); setNewGoalDate(undefined);}}>
-                  取消
-                </Button>
-                <Button onClick={handleCreateGoal}>创建目标</Button>
-              </DialogFooter>
+              <GoalFormFields 
+                key={`create-goal-${isCreateDialogOpen}`}
+                onSave={handleCreateGoal}
+                onCancel={() => setIsCreateDialogOpen(false)}
+                submitButtonText="创建目标"
+                showCancelButton={true}
+                formId="create-goal-view"
+              />
             </DialogContent>
           </Dialog>
         </div>
@@ -506,11 +450,11 @@ export function GoalsView() {
                       <ChevronRight className="h-4 w-4 mr-2" />
                       查看详情
                     </DropdownMenuItem>
-                    <DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openEditDialog(goal)}>
                       <Edit className="h-4 w-4 mr-2" />
                       编辑
                     </DropdownMenuItem>
-                    <DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleDeleteGoal(goal.id)}>
                       <Trash2 className="h-4 w-4 mr-2" />
                       删除
                     </DropdownMenuItem>
@@ -543,10 +487,10 @@ export function GoalsView() {
                       <span>{getStatusText(goal.status)}</span>
                     </Badge>
                   </div>
-                  {goal.dueDate && (
+                  {goal.targetDate && (
                     <Badge variant="outline" className="flex items-center space-x-1">
                       <Calendar className="h-3 w-3" />
-                      <span>{goal.dueDate.toLocaleDateString()}</span>
+                      <span>{format(new Date(goal.targetDate), "yyyy-MM-dd")}</span>
                     </Badge>
                   )}
                 </div>
@@ -561,7 +505,6 @@ export function GoalsView() {
         ))}
       </div>
 
-      {/* Goal Detail Dialog */}
       <Dialog open={isDetailDialogOpen} onOpenChange={(isOpen) => { setIsDetailDialogOpen(isOpen); if (!isOpen) setSelectedGoal(null); }}>
         <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
           {selectedGoal && (
@@ -594,11 +537,11 @@ export function GoalsView() {
                 </div>
 
                 <div className="flex items-center justify-between">
-                  {selectedGoal.dueDate && (
+                  {selectedGoal.targetDate && (
                     <div className="flex items-center space-x-2">
                       <Clock className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm">
-                        期望完成日期: <span className="font-medium">{selectedGoal.dueDate.toLocaleDateString()}</span>
+                        期望完成日期: <span className="font-medium">{format(new Date(selectedGoal.targetDate), "yyyy-MM-dd")}</span>
                       </span>
                     </div>
                   )}
@@ -614,7 +557,7 @@ export function GoalsView() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => { /* Placeholder for Add Associated Project */ alert("功能待实现：添加关联项目"); }}>
+                        <DropdownMenuItem onClick={() => { alert("功能待实现：添加关联项目"); }}>
                           <Flag className="h-4 w-4 mr-2" />
                           添加关联项目
                         </DropdownMenuItem>
@@ -631,7 +574,6 @@ export function GoalsView() {
                   </div>
                 </div>
 
-                {/* Milestones Section in Goal Detail Dialog */}
                 {isLoadingMilestones ? (
                   <div className="text-center py-4"><RefreshCw className="h-6 w-6 animate-spin text-primary mx-auto" /><p className="text-muted-foreground mt-2">正在加载里程碑...</p></div>
                 ) : currentGoalMilestones.length > 0 ? (
@@ -661,7 +603,7 @@ export function GoalsView() {
                         ))}
                       </CardContent>
                       <CardFooter>
-                        <Button variant="outline" size="sm" className="w-full" onClick={() => openAddMilestoneDialog(selectedGoal.id)} >
+                        <Button variant="outline" size="sm" className="w-full" onClick={() => {if (selectedGoal) openAddMilestoneDialog(selectedGoal.id)}} >
                           <Plus className="h-4 w-4 mr-2" /> 添加里程碑
                         </Button>
                       </CardFooter>
@@ -670,7 +612,7 @@ export function GoalsView() {
                 ) : (
                   <div className="text-center text-muted-foreground py-4 border rounded-md">
                     <p className="mb-2">此目标暂无里程碑。</p>
-                    <Button variant="outline" size="sm" onClick={() => openAddMilestoneDialog(selectedGoal.id)}>
+                    <Button variant="outline" size="sm" onClick={() => {if (selectedGoal) openAddMilestoneDialog(selectedGoal.id)}}>
                       <Plus className="h-4 w-4 mr-2" /> 添加第一个里程碑
                     </Button>
                   </div>
@@ -695,7 +637,26 @@ export function GoalsView() {
         </DialogContent>
       </Dialog>
 
-      {/* Add/Edit Milestone Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>编辑目标: {editingGoal?.name}</DialogTitle>
+            <DialogDescription>更新您的目标详细信息。</DialogDescription>
+          </DialogHeader>
+          {editingGoal && (
+            <GoalFormFields
+              key={editingGoal.id}
+              initialData={editFormInitialData}
+              onSave={handleUpdateGoal}
+              onCancel={() => setIsEditDialogOpen(false)}
+              submitButtonText="保存更改"
+              showCancelButton={true}
+              formId={`edit-goal-${editingGoal.id}-view`}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isMilestoneDialogOpen} onOpenChange={(isOpen) => { if (!isOpen) resetMilestoneForm(); setIsMilestoneDialogOpen(isOpen); }}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
@@ -714,32 +675,16 @@ export function GoalsView() {
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="milestone-title">标题 <span className="text-red-500">*</span></Label>
-              <Input
-                id="milestone-title"
-                placeholder="输入里程碑标题"
-                value={milestoneForm.title}
-                onChange={(e) => setMilestoneForm({ ...milestoneForm, title: e.target.value })}
-              />
+              <Input id="milestone-title" placeholder="输入里程碑标题" value={milestoneForm.title} onChange={(e) => setMilestoneForm({ ...milestoneForm, title: e.target.value })} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="milestone-description">描述</Label>
-              <Textarea
-                id="milestone-description"
-                placeholder="输入里程碑描述（可选）"
-                value={milestoneForm.description}
-                onChange={(e) => setMilestoneForm({ ...milestoneForm, description: e.target.value })}
-                rows={3}
-              />
+              <Textarea id="milestone-description" placeholder="输入里程碑描述（可选）" value={milestoneForm.description} onChange={(e) => setMilestoneForm({ ...milestoneForm, description: e.target.value })} rows={3} />
             </div>
             <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                     <Label htmlFor="milestone-status">状态 <span className="text-red-500">*</span></Label>
-                    <select
-                        id="milestone-status"
-                        value={milestoneForm.status}
-                        onChange={(e) => setMilestoneForm({ ...milestoneForm, status: e.target.value as DBMilestone['status'] })}
-                        className="flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1"
-                    >
+                    <select id="milestone-status" value={milestoneForm.status} onChange={(e) => setMilestoneForm({ ...milestoneForm, status: e.target.value as DBMilestone['status'] })} className="flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1">
                         <option value="pending">待处理</option>
                         <option value="inProgress">进行中</option>
                         <option value="completed">已完成</option>
@@ -750,17 +695,12 @@ export function GoalsView() {
                     <Label htmlFor="milestone-targetDate">目标日期</Label>
                     <Popover>
                         <PopoverTrigger asChild>
-                        <Button
-                            variant={"outline"}
-                            className={cn("w-full justify-start text-left font-normal", !milestoneTargetDate && "text-muted-foreground")}
-                        >
+                        <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !milestoneTargetDate && "text-muted-foreground")} >
                             <CalendarIcon className="mr-2 h-4 w-4" />
                             {milestoneTargetDate ? format(milestoneTargetDate, "PPP") : <span>选择日期</span>}
                         </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                        <CalendarComponent mode="single" selected={milestoneTargetDate} onSelect={setMilestoneTargetDate} initialFocus />
-                        </PopoverContent>
+                        <PopoverContent className="w-auto p-0"> <CalendarComponent mode="single" selected={milestoneTargetDate} onSelect={setMilestoneTargetDate} initialFocus /> </PopoverContent>
                     </Popover>
                 </div>
             </div>
