@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { TimeLogView } from "@/components/time-log-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { TimeLogView } from "@/components/views/time-log-view"
 
 export default function TimeLogPage() {
   return (

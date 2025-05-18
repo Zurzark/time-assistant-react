@@ -1,7 +1,7 @@
 // IndexedDB 数据库实现
 // 定义数据库名称和版本号
 const DB_NAME = 'FocusPilotDB';
-const DB_VERSION = 3;
+const DB_VERSION = 6;
 
 // 定义对象存储名称
 export enum ObjectStores {
@@ -15,6 +15,9 @@ export enum ObjectStores {
   TIME_LOGS = 'timeLogs',
   TAGS = 'tags',
   APP_SETTINGS = 'appSettings',
+  MILESTONES = 'milestones',
+  TIME_BLOCKS = 'timeBlocks',
+  FIXED_BREAK_RULES = 'fixedBreakRules',
 }
 
 // 定义打开数据库的接口
@@ -223,6 +226,54 @@ export const openDB = (): Promise<IDBResult> => {
             });
             
             console.log('创建应用设置存储');
+          }
+        }
+
+        // 版本 4: 添加 Milestones 对象存储并调整 Goals
+        if (oldVersion < 4) {
+          // 调整 Goals 存储 (如果需要显式移除旧的 milestones 字段的残留数据, 会更复杂)
+          // 目前的策略是应用层不再使用 Goal.milestones 字段
+          if (db.objectStoreNames.contains(ObjectStores.GOALS)) {
+            // If 'milestones' was an index or part of the structure that needs changing beyond just the interface,
+            // it would be handled here. Since it was just a field in the object, new code ignoring it is sufficient.
+            console.log('Goals store re-evaluated for version 4: No direct milestones field.');
+          }
+
+          // 创建 Milestones 存储
+          if (!db.objectStoreNames.contains(ObjectStores.MILESTONES)) {
+            const milestoneStore = db.createObjectStore(ObjectStores.MILESTONES, {
+              keyPath: 'id',
+              autoIncrement: true
+            });
+            milestoneStore.createIndex('byGoalId', 'goalId', { unique: false });
+            milestoneStore.createIndex('byTargetDate', 'targetDate', { unique: false });
+            milestoneStore.createIndex('byStatus', 'status', { unique: false });
+            console.log('创建 Milestones 存储及其索引');
+          }
+        }
+
+        // 版本 5: 添加 TimeBlocks 对象存储
+        if (oldVersion < 5) {
+          if (!db.objectStoreNames.contains(ObjectStores.TIME_BLOCKS)) {
+            const timeBlockStore = db.createObjectStore(ObjectStores.TIME_BLOCKS, {
+              keyPath: 'id',
+              autoIncrement: true,
+            });
+            timeBlockStore.createIndex('byDate', 'date', { unique: false });
+            timeBlockStore.createIndex('byTaskId', 'taskId', { unique: false }); // taskId 可以为 undefined，但索引仍然可以创建
+            console.log('创建 TimeBlocks 存储及其索引');
+          }
+        }
+
+        // 版本 6: 添加 FixedBreakRules 对象存储
+        if (oldVersion < 6) {
+          if (!db.objectStoreNames.contains(ObjectStores.FIXED_BREAK_RULES)) {
+            const fixedBreakRuleStore = db.createObjectStore(ObjectStores.FIXED_BREAK_RULES, {
+              keyPath: 'id',
+              autoIncrement: true,
+            });
+            fixedBreakRuleStore.createIndex('byIsEnabled', 'isEnabled', { unique: false });
+            console.log('创建 FixedBreakRules 存储及其索引');
           }
         }
       };
@@ -545,6 +596,19 @@ export const initDB = async (): Promise<void> => {
 };
 
 // 定义常见的数据类型接口，供应用其他部分使用
+export interface DBMilestone {
+  id?: number;
+  goalId: number | string;
+  title: string;
+  description?: string;
+  targetDate?: Date;
+  status: 'pending' | 'inProgress' | 'completed' | 'blocked';
+  completedDate?: Date;
+  order?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Task {
   id?: number;
   title: string;
@@ -555,7 +619,7 @@ export interface Task {
   completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
-  projectId?: number | string;
+  projectId?: number;
   goalId?: number | string;
   isFrog: 0 | 1;
   estimatedPomodoros?: number;
@@ -596,16 +660,12 @@ export interface Goal {
   id?: number;
   name: string;
   description?: string;
+  goalMeaning?: string;
   targetDate?: Date;
   status: 'active' | 'completed' | 'paused' | 'archived';
   createdAt: Date;
   updatedAt: Date;
-  milestones?: Array<{
-    title: string;
-    targetDate?: Date;
-    completed: boolean;
-  }>;
-  progress?: number; // 0-100 的进度值
+  progress?: number;
 }
 
 export interface Project {
@@ -618,6 +678,9 @@ export interface Project {
   createdAt: Date;
   updatedAt: Date;
   color?: string;
+  progress: number; // 0-100 的进度值
+  totalTasks?: number;
+  completedTasks?: number;
 }
 
 export interface Event {
@@ -661,4 +724,73 @@ export interface Tag {
 export interface AppSetting {
   key: string; // 作为主键
   value: any;
+}
+
+export interface TimeBlock {
+  id?: number; // 主键，自增
+  taskId?: number | string; // 关联的任务ID (来自 'tasks' 表), 可选
+  title: string; // 时间块的标题
+  type: 'task' | 'meeting' | 'break' | 'personal' | 'plan'; // 时间块的类别/类型
+  startTime: Date; // 开始时间 (包含日期和时间)
+  endTime: Date; // 结束时间 (包含日期和时间)
+  date: string; // YYYY-MM-DD格式，用于快速按天查询
+  createdAt: Date; // 创建时间
+  updatedAt: Date; // 最后更新时间
+  fixedBreakId?: string; // 新增：用于标识此时间块是否由固定休息规则生成
+}
+
+/**
+ * 根据 Goal ID 获取所有里程碑
+ * @param goalId 目标ID
+ * @returns Promise 解析为里程碑数组
+ */
+export const getMilestonesByGoalId = (goalId: number | string): Promise<DBMilestone[]> => {
+  return getByIndex<DBMilestone>(ObjectStores.MILESTONES, 'byGoalId', goalId);
+};
+
+/**
+ * 添加新的里程碑
+ * @param milestoneData 要添加的里程碑数据 (不含id)
+ * @returns Promise 解析为添加的里程碑ID
+ */
+export const addMilestone = (milestoneData: Omit<DBMilestone, 'id'>): Promise<number> => {
+  return add<Omit<DBMilestone, 'id'>>(ObjectStores.MILESTONES, milestoneData);
+};
+
+/**
+ * 更新里程碑数据
+ * @param milestoneData 要更新的里程碑数据 (必须包含id)
+ * @returns Promise 解析为成功状态
+ */
+export const updateMilestone = (milestoneData: DBMilestone): Promise<boolean> => {
+  return update<DBMilestone>(ObjectStores.MILESTONES, milestoneData);
+};
+
+/**
+ * 删除里程碑
+ * @param milestoneId 要删除的里程碑ID
+ * @returns Promise 解析为成功状态
+ */
+export const deleteMilestone = (milestoneId: number): Promise<boolean> => {
+  return remove(ObjectStores.MILESTONES, milestoneId);
+};
+
+// 定义固定休息时段的结构 (如果计划从 AppSetting 中读取)
+export interface FixedBreakSchedule {
+  id: string; // 唯一标识符, e.g., 'morning_break'
+  title: string;
+  startTime: string; // 'HH:MM'
+  endTime: string;   // 'HH:MM'
+  // daysOfWeek?: number[]; // 可选，简化版可不实现
+}
+
+export interface FixedBreakRule {
+  id?: number; // 主键, 自增
+  label?: string; // 规则标签/名称, 例如 '午休'
+  startTime: string; // HH:MM格式, 例如 '12:00'
+  endTime: string; // HH:MM格式, 例如 '13:00'
+  daysOfWeek: string[]; // 例如 ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
+  isEnabled: boolean; // 此规则当前是否启用, 默认为 true
+  createdAt: Date;
+  updatedAt: Date;
 }

@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { CalendarView } from "@/components/calendar-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { CalendarView } from "@/components/views/calendar-view"
 
 export default function CalendarPage() {
   return (

@@ -11,7 +11,7 @@ export interface Task {
   completed: boolean;
   priority: "important-urgent" | "important-not-urgent" | "not-important-urgent" | "not-important-not-urgent";
   dueDate?: Date;
-  projectId?: number | string;
+  projectId?: number;
   tags?: string[];
   subtasks?: { id: number; title: string; completed: boolean }[];
   isFrog?: boolean;

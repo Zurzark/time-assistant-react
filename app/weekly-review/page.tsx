@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { WeeklyReviewView } from "@/components/weekly-review-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { WeeklyReviewView } from "@/components/views/weekly-review-view"
 
 export default function WeeklyReviewPage() {
   return (

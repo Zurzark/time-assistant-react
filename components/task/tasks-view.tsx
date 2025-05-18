@@ -52,12 +52,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CalendarIcon } from "@radix-ui/react-icons"
 import { format } from "date-fns"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
-import { PomodoroModal } from "@/components/pomodoro-modal"
+import { PomodoroModal } from "@/components/pomodoro/pomodoro-modal"
 import { ObjectStores, add, get, update, remove, getAll, getByIndex, Task as DBTaskType, Project as DBProjectType, Tag as DBTagType } from "@/lib/db"
 import { Loader2 } from "lucide-react"
 import { EditTaskDialog } from "./edit-task-dialog"
-import { TrashView } from "./trash-view"
-import { ConfirmationDialog } from "./confirmation-dialog"
+import { TrashView } from "../views/trash-view"
+import { ConfirmationDialog } from "../common/confirmation-dialog"
 import {
   NO_PROJECT_VALUE,
   Task,
@@ -66,6 +66,9 @@ import {
   toDBTaskShape,
   fromDBTaskShape
 } from "@/lib/task-utils"
+// import { TaskStatus, TaskPriority, TaskContext } from "@/types/task" // LINTER ERROR: Cannot find module '@/types/task' or its corresponding type declarations. Please verify the file exists and the path alias in tsconfig.json is correct.
+// import { PomodoroTimer } from "./pomodoro-timer" // PomodoroTimer 来源不明确，暂时注释
+import { TaskFormDialog } from "./task-form-dialog"
 
 export function TasksView() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -185,7 +188,11 @@ export function TasksView() {
         status: 'active',
         createdAt: new Date(),
         updatedAt: new Date(),
-        // goalId, description, dueDate, color can be added later or set to defaults
+        progress: 0,
+        description: "",
+        totalTasks: 0,
+        completedTasks: 0,
+        // goalId, dueDate, color can be added later or set to defaults
       };
       const newId = await add(ObjectStores.PROJECTS, newProjectData as DBProjectType);
       await loadProjects(); // Refresh project list

@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { AnalyticsView } from "@/components/analytics-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { AnalyticsView } from "@/components/views/analytics-view"
 
 export default function AnalyticsPage() {
   return (

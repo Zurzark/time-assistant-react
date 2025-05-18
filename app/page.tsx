@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { TodayDashboard } from "@/components/today-dashboard"
+import { MainNav } from "@/components/layout/main-nav"
+import { TodayDashboard } from "@/components/dashboard/today-dashboard"
 
 export default function Home() {
   return (

@@ -1,4 +1,4 @@
-import { PlanningView } from "@/components/planning-view"
+import { PlanningView } from "@/components/views/planning-view"
 
 export default function PlanningPage() {
   return <PlanningView />

@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { PomodoroView } from "@/components/pomodoro-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { PomodoroView } from "@/components/pomodoro/pomodoro-view"
 
 export default function PomodoroPage() {
   return (

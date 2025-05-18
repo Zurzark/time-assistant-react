@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { ProjectsView } from "@/components/projects-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { ProjectsView } from "@/components/views/projects-view"
 
 export default function ProjectsPage() {
   return (

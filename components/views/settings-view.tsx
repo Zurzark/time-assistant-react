@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,9 +13,45 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
-import { Bell, Brain, Clock, Download, Globe, Moon, Settings, Sun, Tag, Timer, User } from "lucide-react"
+import { 
+  Bell, 
+  Brain, 
+  Clock, 
+  Download, 
+  Globe, 
+  Moon, 
+  Settings, 
+  Sun, 
+  Tag, 
+  Timer, 
+  User,
+  Edit3, // 用于编辑按钮
+  Trash2, // 用于删除按钮
+  PlusCircle, // 用于添加按钮
+  ListChecks, // 用于规则列表图标 (可选)
+  Loader2, // 用于加载状态
+  AlertCircle // 用于错误状态
+} from "lucide-react"
 import { TimeField } from "@/components/ui/time-field"
 import { Time } from "@internationalized/date"
+import {
+  ObjectStores,
+  FixedBreakRule, // 新的接口
+  getAll as getAllDB,
+  add as addDB,
+  update as updateDB,
+  remove as removeDB,
+} from "@/lib/db"
+import { useToast } from "@/components/ui/use-toast"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog"
 
 // 定义标签颜色的类型
 type TagColors = Record<string, string>;
@@ -60,6 +96,50 @@ function hexToHSL(hex: string): string {
   return `${Math.round(h)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
 }
 
+// 定义固定休息时段表单数据接口
+interface FixedBreakRuleFormData {
+  label: string;
+  startTime: Time | { hour: number; minute: number }; 
+  endTime: Time | { hour: number; minute: number };   
+  daysOfWeek: string[]; 
+  isEnabled: boolean; 
+}
+
+const ALL_DAYS_OF_WEEK = [
+  { id: "monday", label: "周一" },
+  { id: "tuesday", label: "周二" },
+  { id: "wednesday", label: "周三" },
+  { id: "thursday", label: "周四" },
+  { id: "friday", label: "周五" },
+  { id: "saturday", label: "周六" },
+  { id: "sunday", label: "周日" },
+] as const;
+
+// Helper to format HH:MM string from Time object for saving
+const formatTimeToString = (time: Time): string => {
+  return `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`;
+};
+
+// Helper to parse HH:MM string to Time object for form display
+const parseStringToTime = (timeStr: string): Time => {
+  const [hour, minute] = timeStr.split(':').map(Number);
+  if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    console.warn(`Invalid time string received: ${timeStr}. Defaulting to 00:00`);
+    return new Time(0, 0);
+  }
+  return new Time(hour, minute);
+};
+
+// Helper to display days of week
+const displayDaysOfWeek = (days: string[]): string => {
+  if (!days || days.length === 0) return "未设置";
+  const sortedDays = [...days].sort((a, b) => ALL_DAYS_OF_WEEK.findIndex(d => d.id === a) - ALL_DAYS_OF_WEEK.findIndex(d => d.id === b));
+  if (sortedDays.length === 7) return "每天";
+  if (sortedDays.length === 5 && sortedDays.every(d => ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(d))) return "工作日 (周一至周五)";
+  if (sortedDays.length === 2 && sortedDays.every(d => ["saturday", "sunday"].includes(d))) return "周末 (周六、周日)";
+  return sortedDays.map(dayId => ALL_DAYS_OF_WEEK.find(d => d.id === dayId)?.label || dayId).join(", ");
+};
+
 export function SettingsView() {
   const { theme, setTheme, resolvedTheme } = useTheme()
   const [activeTab, setActiveTab] = useState("account")
@@ -82,6 +162,24 @@ export function SettingsView() {
     家庭: "#f59e0b",
     健康: "#8b5cf6",
   })
+  const { toast } = useToast(); // 获取 toast
+
+  // 新增状态：固定休息时段规则管理
+  const [fixedBreakRules, setFixedBreakRules] = useState<FixedBreakRule[]>([]);
+  const [loadingFixedBreakRules, setLoadingFixedBreakRules] = useState(true);
+  const [fixedBreakRuleError, setFixedBreakRuleError] = useState<string | null>(null);
+  const [isFixedBreakRuleModalOpen, setIsFixedBreakRuleModalOpen] = useState(false);
+  const [currentEditingFixedBreakRule, setCurrentEditingFixedBreakRule] = useState<FixedBreakRule | null>(null);
+  const [fixedBreakRuleSaving, setFixedBreakRuleSaving] = useState(false);
+
+  const initialFixedBreakRuleFormData: FixedBreakRuleFormData = {
+    label: "",
+    startTime: new Time(9, 0),
+    endTime: new Time(9, 30),
+    daysOfWeek: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+    isEnabled: true,
+  };
+  const [fixedBreakRuleFormData, setFixedBreakRuleFormData] = useState<FixedBreakRuleFormData>(initialFixedBreakRuleFormData);
 
   // 预定义主题颜色
   const predefinedColors = [
@@ -158,6 +256,184 @@ export function SettingsView() {
   const handleThemeColorChange = (color: string) => {
     setThemeColor(color)
   }
+
+  const loadFixedBreakRules = useCallback(async () => {
+    setLoadingFixedBreakRules(true);
+    setFixedBreakRuleError(null);
+    try {
+      const rules = await getAllDB<FixedBreakRule>(ObjectStores.FIXED_BREAK_RULES);
+      rules.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      setFixedBreakRules(rules);
+    } catch (err) {
+      console.error("Failed to load fixed break rules:", err);
+      setFixedBreakRuleError("无法加载固定休息时段规则。如问题持续，请尝试刷新页面或检查数据库。");
+      toast({ title: "加载失败", description: "无法加载固定休息时段规则。", variant: "destructive" });
+    } finally {
+      setLoadingFixedBreakRules(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (activeTab === "worktime") {
+      loadFixedBreakRules();
+    }
+  }, [activeTab, loadFixedBreakRules]);
+
+  // Placeholder functions for actions - to be implemented next
+  const handleOpenAddFixedBreakRuleModal = () => {
+    setCurrentEditingFixedBreakRule(null);
+    setFixedBreakRuleFormData(initialFixedBreakRuleFormData);
+    setIsFixedBreakRuleModalOpen(true);
+  };
+
+  const handleOpenEditFixedBreakRuleModal = (rule: FixedBreakRule) => {
+    setCurrentEditingFixedBreakRule(rule);
+    setFixedBreakRuleFormData({
+      label: rule.label || "",
+      startTime: parseStringToTime(rule.startTime),
+      endTime: parseStringToTime(rule.endTime),
+      daysOfWeek: rule.daysOfWeek || [],
+      isEnabled: rule.isEnabled,
+    });
+    setIsFixedBreakRuleModalOpen(true);
+  };
+
+  const handleToggleFixedBreakRuleEnabled = async (rule: FixedBreakRule) => {
+    const updatedRule = { ...rule, isEnabled: !rule.isEnabled, updatedAt: new Date() };
+    try {
+      setFixedBreakRuleSaving(true); // Use a general saving state or specific one
+      await updateDB(ObjectStores.FIXED_BREAK_RULES, updatedRule);
+      toast({ title: "规则状态已更新", description: `规则 "${rule.label || rule.startTime + '-' + rule.endTime}" 已${updatedRule.isEnabled ? '启用' : '禁用'}。` });
+      loadFixedBreakRules(); // Refresh list
+    } catch (error) {
+      console.error("Failed to update rule state:", error);
+      toast({ title: "更新失败", description: "无法更新规则状态。", variant: "destructive" });
+    } finally {
+      setFixedBreakRuleSaving(false);
+    }
+  };
+
+  const handleDeleteFixedBreakRule = async (ruleId: number, ruleLabel?: string) => {
+    const ruleIdentifier = ruleLabel || fixedBreakRules.find(r => r.id === ruleId)?.startTime + ' - ' + fixedBreakRules.find(r => r.id === ruleId)?.endTime;
+    if (window.confirm(`确定要删除此固定休息时段 "${ruleIdentifier}" 吗？此操作无法撤销。`)) {
+      try {
+        setFixedBreakRuleSaving(true);
+        await removeDB(ObjectStores.FIXED_BREAK_RULES, ruleId);
+        toast({ title: "删除成功", description: `固定休息时段 "${ruleIdentifier}" 已被删除。` });
+        loadFixedBreakRules(); // Refresh list
+      } catch (error) {
+        console.error("Failed to delete rule:", error);
+        toast({ title: "删除失败", description: "无法删除该规则。", variant: "destructive" });
+      } finally {
+        setFixedBreakRuleSaving(false);
+      }
+    }
+  };
+
+  const handleFixedBreakRuleFormChange = (field: keyof FixedBreakRuleFormData, value: string | Time | string[]) => {
+    if (field === 'startTime' || field === 'endTime') {
+      setFixedBreakRuleFormData(prev => ({ ...prev, [field]: value as Time }));
+    } else if (field === 'daysOfWeek') {
+       // This case is handled by handleFixedBreakRuleDayToggle
+    } else if (field === 'label' || field === 'isEnabled') { // Ensure isEnabled is handled if it's directly set, though typically through Switch
+      setFixedBreakRuleFormData(prev => ({ ...prev, [field]: value }));
+    } else {
+      setFixedBreakRuleFormData(prev => ({ ...prev, [field]: value as string }));
+    }
+  };
+
+  const handleFixedBreakRuleDayToggle = (dayId: string) => {
+    setFixedBreakRuleFormData(prev => {
+      const newDays = prev.daysOfWeek.includes(dayId)
+        ? prev.daysOfWeek.filter(d => d !== dayId)
+        : [...prev.daysOfWeek, dayId];
+      newDays.sort((a, b) => ALL_DAYS_OF_WEEK.findIndex(d => d.id === a) - ALL_DAYS_OF_WEEK.findIndex(d => d.id === b)); // Keep days sorted
+      return { ...prev, daysOfWeek: newDays };
+    });
+  };
+  
+  const handleCloseFixedBreakRuleModal = () => {
+    setIsFixedBreakRuleModalOpen(false);
+  };
+
+  const handleSaveFixedBreakRule = async () => {
+    const { label, startTime: startTimeInput, endTime: endTimeInput, daysOfWeek, isEnabled: formIsEnabled } = fixedBreakRuleFormData;
+
+    let startTime: Time;
+    let endTime: Time;
+
+    if (startTimeInput instanceof Time) {
+      startTime = startTimeInput;
+    } else if (typeof startTimeInput === 'object' && startTimeInput !== null && 'hour' in startTimeInput && 'minute' in startTimeInput) {
+      startTime = new Time(Number(startTimeInput.hour), Number(startTimeInput.minute));
+    } else {
+      toast({ title: "类型错误", description: "开始时间格式不正确。", variant: "destructive" });
+      return;
+    }
+
+    if (endTimeInput instanceof Time) {
+      endTime = endTimeInput;
+    } else if (typeof endTimeInput === 'object' && endTimeInput !== null && 'hour' in endTimeInput && 'minute' in endTimeInput) {
+      endTime = new Time(Number(endTimeInput.hour), Number(endTimeInput.minute));
+    } else {
+      toast({ title: "类型错误", description: "结束时间格式不正确。", variant: "destructive" });
+      return;
+    }
+
+    if (startTime.compare(endTime) >= 0) {
+      toast({ title: "验证错误", description: "结束时间必须晚于开始时间。", variant: "destructive" });
+      return;
+    }
+    if (daysOfWeek.length === 0) {
+      toast({ title: "验证错误", description: "请至少选择一个应用此规则的星期。", variant: "destructive" });
+      return;
+    }
+    if (label.length > 100) { 
+        toast({ title: "验证错误", description: "标签名称过长 (最多100字符)。", variant: "destructive" });
+        return;
+    }
+
+    setFixedBreakRuleSaving(true);
+    try {
+      const ruleDataPayload = {
+        label: label.trim() || undefined, 
+        startTime: formatTimeToString(startTime),
+        endTime: formatTimeToString(endTime),
+        daysOfWeek: daysOfWeek,
+      };
+
+      if (currentEditingFixedBreakRule) {
+        const ruleToUpdate: FixedBreakRule = {
+          ...currentEditingFixedBreakRule,
+          ...ruleDataPayload,
+          label: ruleDataPayload.label, // ensure label is explicitly passed
+          daysOfWeek: ruleDataPayload.daysOfWeek, // ensure daysOfWeek is explicitly passed
+          isEnabled: formIsEnabled, 
+          updatedAt: new Date(),
+        };
+        await updateDB(ObjectStores.FIXED_BREAK_RULES, ruleToUpdate);
+        toast({ title: "更新成功", description: `固定休息规则 "${ruleToUpdate.label || ruleToUpdate.startTime +'-'+ ruleToUpdate.endTime}" 已更新。` });
+      } else {
+        const newRule: Omit<FixedBreakRule, 'id'> = {
+          ...ruleDataPayload,
+          label: ruleDataPayload.label, // ensure label is explicitly passed
+          daysOfWeek: ruleDataPayload.daysOfWeek, // ensure daysOfWeek is explicitly passed
+          isEnabled: true, 
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        await addDB(ObjectStores.FIXED_BREAK_RULES, newRule);
+        toast({ title: "创建成功", description: `新的固定休息规则已添加。` });
+      }
+      await loadFixedBreakRules(); // Use await here to ensure list is updated before modal might reopen or other actions
+      handleCloseFixedBreakRuleModal();
+    } catch (error) {
+      console.error("Failed to save fixed break rule:", error);
+      toast({ title: "保存失败", description: "无法保存规则，请重试。", variant: "destructive" });
+    } finally {
+      setFixedBreakRuleSaving(false);
+    }
+  };
 
   return (
     <div className="container py-6">
@@ -685,13 +961,15 @@ export function SettingsView() {
                     <div className="grid gap-2">
                       <Label>选择工作日</Label>
                       <div className="flex flex-wrap gap-2">
-                        {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((day) => (
-                          <Checkbox
-                            key={day}
-                            id={day}
-                            defaultChecked={workDays.includes(day)}
-                            onCheckedChange={() => handleWorkDayToggle(day)}
-                          />
+                        {ALL_DAYS_OF_WEEK.map((day) => (
+                          <div key={day.id} className="flex items-center space-x-1">
+                            <Checkbox
+                              id={`workday-${day.id}`}
+                              checked={workDays.includes(day.id)}
+                              onCheckedChange={() => handleWorkDayToggle(day.id)}
+                            />
+                            <Label htmlFor={`workday-${day.id}`} className="text-sm font-normal">{day.label}</Label>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -710,6 +988,170 @@ export function SettingsView() {
                       <TimeField id="work-end-time" value={workEndTime} onChange={setWorkEndTime} />
                     </div>
                   </div>
+
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-medium">固定休息时段</h3>
+                    <p className="text-sm text-muted-foreground">
+                      设置您希望在每日时间轴上自动创建的固定休息时间段。
+                    </p>
+                    
+                    {loadingFixedBreakRules && (
+                      <div className="flex items-center justify-center py-6 text-muted-foreground">
+                        <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                        <span>正在加载规则...</span>
+                      </div>
+                    )}
+
+                    {!loadingFixedBreakRules && fixedBreakRuleError && (
+                      <div className="rounded-md border border-red-200 bg-red-50 p-4 text-red-600">
+                        <div className="flex items-center">
+                          <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
+                          <span className="flex-grow">{fixedBreakRuleError}</span>
+                          <Button variant="outline" size="sm" onClick={loadFixedBreakRules} className="ml-4 flex-shrink-0">
+                            重试
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {!loadingFixedBreakRules && !fixedBreakRuleError && fixedBreakRules.length === 0 && (
+                      <div className="flex flex-col items-center justify-center space-y-3 rounded-lg border-2 border-dashed border-border py-10 text-center">
+                        <ListChecks className="h-12 w-12 text-muted-foreground" />
+                        <p className="text-lg font-medium text-muted-foreground">
+                          您尚未设置任何固定的休息时段。
+                        </p>
+                        <Button onClick={handleOpenAddFixedBreakRuleModal}>
+                          <PlusCircle className="mr-2 h-4 w-4" /> 添加休息时段
+                        </Button>
+                      </div>
+                    )}
+
+                    {!loadingFixedBreakRules && !fixedBreakRuleError && fixedBreakRules.length > 0 && (
+                      <div className="space-y-3">
+                        {fixedBreakRules.map(rule => (
+                          <Card key={rule.id} className={cn(!rule.isEnabled && "bg-muted/30 dark:bg-muted/20")}>
+                            <CardContent className="p-3 flex items-center justify-between gap-3">
+                              <div className={cn("flex-grow", !rule.isEnabled && "opacity-60")}>
+                                <p className="font-semibold text-sm truncate" title={rule.label || "休息时段"}>{rule.label || "休息时段"}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {rule.startTime} - {rule.endTime}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {displayDaysOfWeek(rule.daysOfWeek)}
+                                </p>
+                              </div>
+                              <div className="flex items-center space-x-1 flex-shrink-0">
+                                <Switch
+                                  checked={rule.isEnabled}
+                                  onCheckedChange={() => handleToggleFixedBreakRuleEnabled(rule)}
+                                  aria-label={rule.isEnabled ? "禁用规则" : "启用规则"}
+                                  id={`enable-rule-${rule.id}`}
+                                  disabled={fixedBreakRuleSaving} // Disable switch during any save operation
+                                />
+                                <Button variant="ghost" size="icon" onClick={() => handleOpenEditFixedBreakRuleModal(rule)} title="编辑规则" disabled={fixedBreakRuleSaving}>
+                                  <Edit3 className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10" 
+                                  onClick={() => rule.id !== undefined && handleDeleteFixedBreakRule(rule.id, rule.label)}
+                                  title="删除规则"
+                                  disabled={fixedBreakRuleSaving}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+
+                    {!loadingFixedBreakRules && !fixedBreakRuleError && fixedBreakRules.length > 0 && (
+                      <Button onClick={handleOpenAddFixedBreakRuleModal} className="mt-4 w-full" disabled={fixedBreakRuleSaving}>
+                        <PlusCircle className="mr-2 h-4 w-4" /> 添加新的休息时段
+                      </Button>
+                    )}
+                  </div>
+                  {/* Fixed Break Rule Modal */}
+                  <Dialog open={isFixedBreakRuleModalOpen} onOpenChange={(open) => {if (!open) handleCloseFixedBreakRuleModal(); else setIsFixedBreakRuleModalOpen(true);}}>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>{currentEditingFixedBreakRule ? "编辑固定休息时段" : "添加固定休息时段"}</DialogTitle>
+                        <DialogDescription>
+                          {currentEditingFixedBreakRule ? "修改规则的详细信息。" : "设置一个新的自动安排的休息时间。"}
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="rule-label" className="text-right">标签/名称</Label>
+                          <Input 
+                            id="rule-label" 
+                            value={fixedBreakRuleFormData.label}
+                            onChange={(e) => handleFixedBreakRuleFormChange('label', e.target.value)}
+                            className="col-span-3"
+                            placeholder="例如：午休 (可选)"
+                          />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="rule-startTime" className="text-right">开始时间</Label>
+                          <TimeField 
+                            id="rule-startTime"
+                            aria-label="规则开始时间"
+                            value={fixedBreakRuleFormData.startTime}
+                            onChange={(time) => handleFixedBreakRuleFormChange('startTime', time)}
+                            className="col-span-3"
+                          />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="rule-endTime" className="text-right">结束时间</Label>
+                          <TimeField
+                            id="rule-endTime"
+                            aria-label="规则结束时间"
+                            value={fixedBreakRuleFormData.endTime}
+                            onChange={(time) => handleFixedBreakRuleFormChange('endTime', time)}
+                            className="col-span-3"
+                          />
+                        </div>
+                        <div className="grid grid-cols-4 items-start gap-4">
+                          <Label className="text-right pt-1">应用星期</Label>
+                          <div className="col-span-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-2 gap-y-3">
+                            {ALL_DAYS_OF_WEEK.map(day => (
+                              <div key={day.id} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`rule-day-${day.id}`}
+                                  checked={fixedBreakRuleFormData.daysOfWeek.includes(day.id)}
+                                  onCheckedChange={() => handleFixedBreakRuleDayToggle(day.id)}
+                                />
+                                <Label htmlFor={`rule-day-${day.id}`} className="font-normal text-sm cursor-pointer">{day.label}</Label>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {currentEditingFixedBreakRule && (
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="rule-isEnabled" className="text-right">启用此规则</Label>
+                                <Switch
+                                    id="rule-isEnabled"
+                                    checked={fixedBreakRuleFormData.isEnabled}
+                                    onCheckedChange={(checked) => setFixedBreakRuleFormData(prev => ({...prev, isEnabled: checked}))}
+                                    className="col-span-3 justify-self-start" 
+                                />
+                            </div>
+                        )}
+                      </div>
+                      <DialogFooter>
+                        <Button type="button" variant="outline" onClick={handleCloseFixedBreakRuleModal} disabled={fixedBreakRuleSaving}>取消</Button>
+                        <Button type="button" onClick={handleSaveFixedBreakRule} disabled={fixedBreakRuleSaving}>
+                          {fixedBreakRuleSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          {currentEditingFixedBreakRule ? "保存更改" : "创建规则"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               )}
 

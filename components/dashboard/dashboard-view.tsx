@@ -10,8 +10,10 @@ import { Play, Pause, Check, Plus, Clock, CheckCircle2, AlertCircle, Lightbulb, 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useSidebar } from "@/components/ui/sidebar"
-import { TaskFormDialog, type Task } from "@/components/task-form-dialog"
+import { TaskFormDialog, type Task } from "../task/task-form-dialog"
 import { toast } from "@/components/ui/use-toast"
+import { SettingsView } from "../views/settings-view"
+import { TodayDashboard } from "./today-dashboard"
 
 export function DashboardView() {
   const [timerActive, setTimerActive] = useState(false)

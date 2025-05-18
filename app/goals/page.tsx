@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { GoalsView } from "@/components/goals-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { GoalsView } from "@/components/views/goals-view"
 
 export default function GoalsPage() {
   return (

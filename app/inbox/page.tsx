@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { InboxView } from "@/components/inbox-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { InboxView } from "@/components/views/inbox-view"
 
 export default function InboxPage() {
   return (

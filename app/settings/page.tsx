@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { SettingsView } from "@/components/settings-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { SettingsView } from "@/components/views/settings-view"
 
 export default function SettingsPage() {
   return (

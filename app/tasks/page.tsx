@@ -1,5 +1,5 @@
-import { MainNav } from "@/components/main-nav"
-import { TasksView } from "@/components/tasks-view"
+import { MainNav } from "@/components/layout/main-nav"
+import { TasksView } from "@/components/task/tasks-view"
 
 export default function TasksPage() {
   return (

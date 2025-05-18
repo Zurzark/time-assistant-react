@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,9 @@ import { Calendar, Clock, Flag, Lightbulb, Plus, Tag, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 
+// IndexedDB imports
+import { getAll, ObjectStores, Project as DBProject } from "@/lib/db"
+
 // 定义任务类型
 export type Task = {
   id: number
@@ -28,7 +31,7 @@ export type Task = {
   priority: "high" | "medium" | "low"
   dueDate: string
   estimatedTime: number
-  project: string
+  projectId?: number
   status: "todo" | "in-progress" | "completed"
   tags: string[]
 }
@@ -36,7 +39,7 @@ export type Task = {
 type TaskFormDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (task: Omit<Task, "id">) => void
+  onSave: (task: Omit<Task, "id" | "project"> & { projectId?: number }) => void
   editTask?: Task | null
 }
 
@@ -47,9 +50,38 @@ export function TaskFormDialog({ open, onOpenChange, onSave, editTask }: TaskFor
   const [dueDate, setDueDate] = useState(editTask?.dueDate || new Date().toISOString().split("T")[0])
   const [estimatedHours, setEstimatedHours] = useState(editTask ? Math.floor(editTask.estimatedTime / 60) : 0)
   const [estimatedMinutes, setEstimatedMinutes] = useState(editTask ? editTask.estimatedTime % 60 : 0)
-  const [project, setProject] = useState(editTask?.project || "产品开发")
+  const [selectedProjectId, setSelectedProjectId] = useState<number | undefined>(editTask?.projectId)
   const [tags, setTags] = useState<string[]>(editTask?.tags || [])
   const [newTag, setNewTag] = useState("")
+
+  const [projectsList, setProjectsList] = useState<DBProject[]>([])
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false)
+  const [projectError, setProjectError] = useState<string | null>(null)
+
+  const fetchProjectsForSelect = useCallback(async () => {
+    if (!open) return;
+    setIsLoadingProjects(true)
+    setProjectError(null)
+    try {
+      const dbProjects = await getAll<DBProject>(ObjectStores.PROJECTS)
+      setProjectsList(dbProjects)
+      if (editTask?.projectId && !dbProjects.find(p => p.id === editTask.projectId)) {
+      } else if (editTask?.projectId) {
+        setSelectedProjectId(editTask.projectId);
+      } else if (dbProjects.length > 0 && !selectedProjectId) {
+      }
+
+    } catch (error) {
+      console.error("Failed to fetch projects for select:", error)
+      setProjectError("无法加载项目列表。")
+    } finally {
+      setIsLoadingProjects(false)
+    }
+  }, [open, editTask?.projectId])
+
+  useEffect(() => {
+    fetchProjectsForSelect()
+  }, [fetchProjectsForSelect])
 
   const handleSave = () => {
     if (!title.trim()) {
@@ -57,18 +89,18 @@ export function TaskFormDialog({ open, onOpenChange, onSave, editTask }: TaskFor
       return
     }
 
-    const task = {
+    const taskToSave = {
       title,
       description,
       priority,
       dueDate,
       estimatedTime: estimatedHours * 60 + estimatedMinutes,
-      project,
+      projectId: selectedProjectId,
       status: editTask?.status || "todo",
       tags,
     }
 
-    onSave(task)
+    onSave(taskToSave)
     onOpenChange(false)
   }
 
@@ -177,17 +209,31 @@ export function TaskFormDialog({ open, onOpenChange, onSave, editTask }: TaskFor
               <Label htmlFor="project">项目</Label>
               <div className="flex items-center">
                 <Tag className="mr-2 h-4 w-4 text-muted-foreground" />
-                <Select value={project} onValueChange={setProject}>
+                <Select 
+                  value={selectedProjectId?.toString() || ""} 
+                  onValueChange={(value) => setSelectedProjectId(value ? Number.parseInt(value) : undefined)}
+                  disabled={isLoadingProjects}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择项目" />
+                    <SelectValue placeholder={isLoadingProjects ? "加载项目中..." : "选择项目"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="产品开发">产品开发</SelectItem>
-                    <SelectItem value="团队管理">团队管理</SelectItem>
-                    <SelectItem value="个人发展">个人发展</SelectItem>
-                    <SelectItem value="健康">健康</SelectItem>
-                    <SelectItem value="沟通">沟通</SelectItem>
-                    <SelectItem value="市场营销">市场营销</SelectItem>
+                    {isLoadingProjects ? (
+                      <SelectItem value="loading" disabled>加载中...</SelectItem>
+                    ) : projectError ? (
+                      <SelectItem value="error" disabled>{projectError}</SelectItem>
+                    ) : projectsList.length === 0 ? (
+                      <SelectItem value="no-projects" disabled>无可用项目</SelectItem>
+                    ) : (
+                      <>
+                        <SelectItem value="">无项目</SelectItem>
+                        {projectsList.map((p) => (
+                          <SelectItem key={p.id} value={p.id!.toString()}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
