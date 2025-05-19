@@ -62,6 +62,8 @@ export function TasksView() {
     selectedTaskForPomodoro,
     setSelectedTaskForPomodoro,
     dispatchStatsUpdate,
+    emptyAllTrashItems, // Placeholder for the new function from useTaskData
+    isEmplyingAllTrash, // Placeholder for the new state from useTaskData
   } = useTaskData();
 
   // --- Filtering and Sorting ---
@@ -306,6 +308,8 @@ export function TasksView() {
               onRestoreTask={handleRestoreTask} // from useTaskData
               onPermanentlyDeleteTask={openPermanentDeleteConfirmDialog} // Opens confirm dialog
               onLoadRetry={loadDeletedTasks} // from useTaskData
+              onEmptyTrash={emptyAllTrashItems} // Pass the new function from useTaskData
+              isEmplyingTrash={isEmplyingAllTrash} // Pass the new state from useTaskData
             />
           ) : (
             <ActiveTasksDisplay

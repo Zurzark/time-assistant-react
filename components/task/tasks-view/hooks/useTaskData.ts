@@ -48,6 +48,7 @@ export function useTaskData() {
     const [loadingTrash, setLoadingTrash] = useState<boolean>(false); // Specific for trash operations
     const [trashError, setTrashError] = useState<Error | null>(null);
 
+    const [isEmplyingAllTrash, setIsEmplyingAllTrash] = useState(false);
 
     const [taskToEdit, setTaskToEdit] = useState<Task | null>(null);
     const [taskToDeleteId, setTaskToDeleteId] = useState<number | null>(null);
@@ -553,6 +554,30 @@ export function useTaskData() {
         }
     }, []); // Assuming taskItem.estimatedDurationHours is part of Task type from task-utils
 
+    const emptyAllTrashItems = async () => {
+        setIsEmplyingAllTrash(true);
+        try {
+            const deletedDbTasks = await getByIndex<DBTaskType>(ObjectStores.TASKS, 'byIsDeleted', 1);
+            if (deletedDbTasks.length === 0) {
+                toast.info("回收站已经是空的。");
+                return;
+            }
+
+            // Perform deletions
+            await Promise.all(deletedDbTasks.map(task => remove(ObjectStores.TASKS, task.id!)));
+            
+            toast.success("回收站已成功清空！");
+            await loadDeletedTasks(); // Refresh the trash view, it should be empty now
+            dispatchStatsUpdate(); // Update stats if clearing trash affects them
+        } catch (error) {
+            console.error("Failed to empty trash:", error);
+            toast.error("清空回收站失败，请重试。");
+            // Optionally set an error state to display to the user or re-throw if needed
+        } finally {
+            setIsEmplyingAllTrash(false);
+        }
+    };
+
     return {
         tasks,
         projectList,
@@ -587,5 +612,7 @@ export function useTaskData() {
         selectedTaskForPomodoro,      // For Pomodoro Modal
         setSelectedTaskForPomodoro, // For Pomodoro Modal
         dispatchStatsUpdate,
+        emptyAllTrashItems,
+        isEmplyingAllTrash, // Ensure this is exported
     };
 }
