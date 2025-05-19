@@ -15,11 +15,11 @@ import { DeleteTaskConfirm } from "../task/delete-task-confirm" // 调整导入�
 import { getAll as getAllDB, add as addDB, update as updateDB, ObjectStores as DBObjectStores, type TimeBlock as DBTimeBlock, type Task as DBTask, Project as DBProjectType, get as getDB } from "@/lib/db";
 // 从 lib/utils.ts 导入共享函数
 import { formatTimeForDisplay, checkTimeOverlap } from "@/lib/utils";
-import { Task as TaskUtilsType, fromDBTaskShape, toDBTaskShape, priorityMapToDB } from "@/lib/task-utils"; // 导入任务工具类型和函数
+import { Task as TaskUtilsType, fromDBTaskShape, toDBTaskShape } from "@/lib/task-utils"; // 导入任务工具类型和函数
 import { toast } from "sonner";
 
 interface FrogTasksCardProps {
-  onPomodoroClick: (taskId: string, taskTitle: string) => void;
+  onPomodoroClick: (taskId: number, taskTitle: string) => void;
   availableProjects?: DBProjectType[]; // Make availableProjects optional or provide a default
   onCreateNewProject?: (name: string) => Promise<number | undefined>; // Optional or provide a default
 }
@@ -52,17 +52,46 @@ export function FrogTasksCard({
       setLoading(true)
       
       const { getByIndex, ObjectStores } = await import('@/lib/db')
-      const frogTasksDB = await getByIndex<DBTask>(
+      // 1. 获取所有 isFrog = 1 且未被软删除的任务
+      const allFrogTasksDB = await getByIndex<DBTask>(
         ObjectStores.TASKS,
         'byIsFrog',
         1 
-      )
+      );
+      const activeFrogTasksDB = allFrogTasksDB.filter((task: DBTask) => !task.isDeleted);
+
+      const today = new Date();
+      const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
+      const filteredTasks = activeFrogTasksDB.filter((dbTask: DBTask) => {
+        // 条件1: 今天完成的青蛙任务
+        if (dbTask.completed && dbTask.completedAt) {
+          const completedAtDate = new Date(dbTask.completedAt);
+          if (completedAtDate >= startOfToday && completedAtDate <= endOfToday) {
+            return true;
+          }
+        }
+        // 条件2: 所有未完成的青蛙任务 (排除计划日期在未来的)
+        if (!dbTask.completed) {
+          if (dbTask.plannedDate) {
+            const plannedDate = new Date(dbTask.plannedDate);
+            // 如果计划日期在今天或今天之前，则包含
+            if (plannedDate <= endOfToday) {
+              return true;
+            }
+            return false; // 计划日期在未来，排除
+          } else {
+            // 如果没有计划日期，未完成的青蛙任务也应包含
+            return true;
+          }
+        }
+        return false; // 其他情况不符合
+      });
       
-      const activeFrogTasks = frogTasksDB
-        .filter((task: DBTask) => !task.isDeleted && task.isFrog && task.id !== undefined)
-        .map(task => fromDBTaskShape(task)); // Convert DBTask to TaskUtilsType
+      const mappedTasks = filteredTasks.map(task => fromDBTaskShape(task)); // Convert DBTask to TaskUtilsType
       
-      setTasks(activeFrogTasks as UIFrogTask[]); // Cast to UIFrogTask (should be compatible)
+      setTasks(mappedTasks as UIFrogTask[]); // Cast to UIFrogTask (should be compatible)
       
     } catch (error) {
       console.error('加载青蛙任务时出错:', error)
@@ -217,9 +246,10 @@ export function FrogTasksCard({
       const newTimeBlock: Omit<DBTimeBlock, 'id'> = {
         taskId: taskId,
         title: title,
-        type: type,
+        sourceType: 'task_plan',
         startTime: proposedStartTime,
         endTime: proposedEndTime,
+        isLogged: 0,
         date: proposedStartTime.toISOString().split('T')[0],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -293,7 +323,7 @@ export function FrogTasksCard({
         // Ensure specific fields from form/updatedTaskData are preserved if toDBTaskShape doesn't cover all or maps differently
         title: updatedTaskData.title,
         description: updatedTaskData.description,
-        priority: priorityMapToDB[updatedTaskData.priority] || originalTaskInDB.priority,
+        priority: updatedTaskData.priority || originalTaskInDB.priority,
         dueDate: updatedTaskData.dueDate, // toDBTaskShape should handle Date to string/Date conversion if necessary for DB
         projectId: typeof updatedTaskData.projectId === 'string' ? parseInt(updatedTaskData.projectId) : updatedTaskData.projectId,
         tags: updatedTaskData.tags || [],
@@ -362,6 +392,13 @@ export function FrogTasksCard({
     }
   };
 
+  // Make sure any internal calls to onPomodoroClick pass task.id as a number.
+  // For instance, if there is a direct call in a loop or a handler:
+  const handlePomodoroTrigger = (task: UIFrogTask) => {
+    // task.id is already number due to UIFrogTask extending TaskUtilsType
+    onPomodoroClick(task.id, task.title);
+  };
+
   return (
     <Card className="h-full flex flex-col">
       <CardHeader className="pb-2">
@@ -407,7 +444,7 @@ export function FrogTasksCard({
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={() => onPomodoroClick(String(task.id), task.title)}
+                  onClick={() => handlePomodoroTrigger(task)}
                 >
                   <Timer className="h-4 w-4" />
                 </Button>

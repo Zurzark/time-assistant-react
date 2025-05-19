@@ -5,20 +5,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { ObjectStores, add, getAll, Project as DBProject, Task as DBTask, Goal as DBGoal, ActivityCategory } from "@/lib/db";
-import { NO_PROJECT_VALUE, TaskPriority, toDBTaskShape } from "@/lib/task-utils";
-import { TaskCategory as UtilTaskCategory, UIPriority } from "../task/TaskFormFields";
-
+import { NO_PROJECT_VALUE, toDBTaskShape } from "@/lib/task-utils";
+import { UIPriority, TaskCategory as UtilTaskCategory } from "../task/TaskFormFields";
 import { TaskFormFields, TaskFormData } from "../task/TaskFormFields";
 import { ProjectFormFields, ProjectFormData } from "../project/ProjectFormFields";
 import { GoalFormFields, GoalFormData } from "../goal/GoalFormFields";
+import { Task as TaskUtilsTask } from "@/lib/task-utils";
+import { cn } from "@/lib/utils";
 
 interface UnifiedAddModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccessfulCreate?: () => void;
+  editingTask?: TaskUtilsTask | null;
+  clearEditingTask?: () => void;
 }
 
-export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: UnifiedAddModalProps) {
+export function UnifiedAddModal({ 
+  open, 
+  onOpenChange, 
+  onSuccessfulCreate, 
+  editingTask, 
+  clearEditingTask 
+}: UnifiedAddModalProps) {
   const [activeTab, setActiveTab] = useState("task");
   const [availableProjects, setAvailableProjects] = useState<DBProject[]>([]);
   const [availableGoals, setAvailableGoals] = useState<DBGoal[]>([]);
@@ -58,11 +67,18 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
     }
     if (open) {
       fetchData();
-      resetTaskForm();
+      if (editingTask) {
+        setActiveTab("task");
+        setTaskFormKey(`task-form-edit-${editingTask.id}-${Date.now()}`);
+      } else {
+        resetTaskForm();
+      }
       resetProjectForm();
       resetGoalForm();
+    } else {
+      clearEditingTask?.();
     }
-  }, [open, resetTaskForm, resetProjectForm, resetGoalForm]);
+  }, [open, editingTask, resetTaskForm, resetProjectForm, resetGoalForm, clearEditingTask]);
 
   const handleCreateNewProjectForTaskForm = async (name: string): Promise<number | undefined> => {
     const now = new Date();
@@ -91,55 +107,103 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
   const handleSaveTask = async (taskData: TaskFormData) => {
     const now = new Date();
 
-    const mapUiPriorityToStoragePriority = (uiPriority: UIPriority): NonNullable<DBTask['priority']> => {
-        switch (uiPriority) {
-            case "importantUrgent": return "importantUrgent";
-            case "importantNotUrgent": return "importantNotUrgent";
-            case "notImportantUrgent": return "notImportantUrgent";
-            case "notImportantNotUrgent": return "notImportantNotUrgent";
-            default: return "notImportantNotUrgent";
+    if (editingTask && editingTask.id !== undefined) {
+        const { get, update, ObjectStores } = await import('@/lib/db');
+        try {
+            const existingDBTask = await get<DBTask>(ObjectStores.TASKS, editingTask.id);
+            if (!existingDBTask) {
+                toast.error("无法找到要更新的原始任务。");
+                return;
+            }
+
+            const taskDataForUtils: Partial<TaskUtilsTask> = {
+                ...taskData,
+                priority: taskData.priority,
+                projectId: typeof taskData.projectId === 'string' && taskData.projectId === NO_PROJECT_VALUE 
+                    ? undefined 
+                    : (typeof taskData.projectId === 'string' ? parseInt(taskData.projectId) : taskData.projectId),
+                category: taskData.category as UtilTaskCategory,
+            };
+
+            const updatedDBTaskFields = toDBTaskShape(taskDataForUtils); 
+
+            const payloadForDB: DBTask = {
+                ...existingDBTask, 
+                ...updatedDBTaskFields, 
+                title: taskData.title,
+                description: taskData.description, 
+                dueDate: taskData.dueDate,
+                projectId: taskDataForUtils.projectId,
+                tags: taskData.tags || [],
+                isFrog: taskData.isFrog ? 1 : 0,
+                estimatedDurationHours: taskData.estimatedDurationHours || 0,
+                category: taskData.category,
+                plannedDate: taskData.plannedDate,
+                isRecurring: taskData.isRecurring ? 1 : 0,
+                recurrenceRule: taskData.recurrenceRule,
+                recurrenceEndDate: taskData.recurrenceEndDate,
+                recurrenceCount: taskData.recurrenceCount,
+                defaultActivityCategoryId: taskData.defaultActivityCategoryId,
+                updatedAt: new Date(),
+            };
+
+            Object.keys(payloadForDB).forEach(keyStr => {
+                const key = keyStr as keyof DBTask;
+                if (payloadForDB[key] === undefined && 
+                    !['description', 'dueDate', 'projectId', 'goalId', 'completedAt', 'actualPomodoros', 'subtasks', 'tags', 'reminderDate', 'recurrenceRule', 'plannedDate', 'order', 'deletedAt', 'category', 'estimatedDurationHours', 'recurrenceEndDate', 'recurrenceCount', 'defaultActivityCategoryId'].includes(key)
+                ) {
+                    delete payloadForDB[key];
+                }
+            });
+
+            await update(ObjectStores.TASKS, payloadForDB);
+            toast.success(`任务 "${taskData.title}" 已成功更新！`);
+            onSuccessfulCreate?.();
+            onOpenChange(false);
+        } catch (error) {
+            console.error("Failed to update task:", error);
+            toast.error("任务更新失败。");
         }
-    };
-
-    const newTaskDataForDb: Omit<DBTask, 'id'> = {
-      title: taskData.title,
-      description: taskData.description,
-      priority: mapUiPriorityToStoragePriority(taskData.priority),
-      dueDate: taskData.dueDate,
-      projectId: typeof taskData.projectId === 'string' && taskData.projectId === NO_PROJECT_VALUE 
-        ? undefined 
-        : (typeof taskData.projectId === 'string' ? parseInt(taskData.projectId) : taskData.projectId),
-      tags: taskData.tags || [],
-      isFrog: taskData.isFrog ? 1 : 0,
-      estimatedDurationHours: taskData.estimatedDurationHours || 0,
-      completed: 0,
-      createdAt: now,
-      updatedAt: now,
-      isDeleted: 0,
-      actualPomodoros: 0,
-      subtasks: [],
-      category: taskData.category,
-      plannedDate: taskData.plannedDate,
-      isRecurring: taskData.isRecurring ? 1 : 0,
-      recurrenceRule: taskData.recurrenceRule,
-      recurrenceEndDate: taskData.recurrenceEndDate,
-      recurrenceCount: taskData.recurrenceCount,
-      defaultActivityCategoryId: taskData.defaultActivityCategoryId,
-      reminderDate: undefined,
-      order: undefined,
-      deletedAt: undefined,
-      goalId: undefined,
-      completedAt: undefined,
-    };
-
-    try {
-      await add(ObjectStores.TASKS, newTaskDataForDb);
-      toast.success("任务已成功创建！", { duration: 6000 });
-      resetTaskForm();
-      onSuccessfulCreate?.();
-    } catch (error) {
-      console.error("Failed to save task:", error);
-      toast.error("任务创建失败。");
+    } else {
+        const newTaskDataForDb: Omit<DBTask, 'id'> = {
+          title: taskData.title,
+          description: taskData.description,
+          priority: taskData.priority,
+          dueDate: taskData.dueDate,
+          projectId: typeof taskData.projectId === 'string' && taskData.projectId === NO_PROJECT_VALUE 
+            ? undefined 
+            : (typeof taskData.projectId === 'string' ? parseInt(taskData.projectId) : taskData.projectId),
+          tags: taskData.tags || [],
+          isFrog: taskData.isFrog ? 1 : 0,
+          estimatedDurationHours: taskData.estimatedDurationHours || 0,
+          completed: 0,
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: 0,
+          actualPomodoros: 0,
+          subtasks: [],
+          category: taskData.category,
+          plannedDate: taskData.plannedDate,
+          isRecurring: taskData.isRecurring ? 1 : 0,
+          recurrenceRule: taskData.recurrenceRule,
+          recurrenceEndDate: taskData.recurrenceEndDate,
+          recurrenceCount: taskData.recurrenceCount,
+          defaultActivityCategoryId: taskData.defaultActivityCategoryId,
+          reminderDate: undefined,
+          order: undefined,
+          deletedAt: undefined,
+          goalId: undefined,
+          completedAt: undefined,
+        };
+        try {
+          await add(ObjectStores.TASKS, newTaskDataForDb);
+          toast.success("任务已成功创建！", { duration: 6000 });
+          resetTaskForm();
+          onSuccessfulCreate?.();
+        } catch (error) {
+          console.error("Failed to save task:", error);
+          toast.error("任务创建失败。");
+        }
     }
   };
 
@@ -204,6 +268,7 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
     if (activeTab === "task") resetTaskForm();
     if (activeTab === "project") resetProjectForm();
     if (activeTab === "goal") resetGoalForm();
+    onOpenChange(false);
   };
 
   const handleModalOpenChange = (newOpenState: boolean) => {
@@ -214,48 +279,58 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
     <Dialog open={open} onOpenChange={handleModalOpenChange}>
       <DialogContent className="sm:max-w-[650px] md:max-w-[700px] lg:max-w-[750px]">
         <DialogHeader>
-          <DialogTitle>添加新内容</DialogTitle>
-          <DialogDescription>快速添加新的任务、项目或目标。</DialogDescription>
+          <DialogTitle>{editingTask ? "编辑任务" : "添加新内容"}</DialogTitle>
+          <DialogDescription>
+            {editingTask ? `正在编辑任务: ${editingTask.title}` : "快速添加新的任务、项目或目标。"}
+          </DialogDescription>
         </DialogHeader>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full pt-2">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="task">任务</TabsTrigger>
-            <TabsTrigger value="project">项目</TabsTrigger>
-            <TabsTrigger value="goal">目标</TabsTrigger>
+        <Tabs value={editingTask ? "task" : activeTab} onValueChange={setActiveTab} className="w-full pt-2">
+          <TabsList className={cn("grid w-full", editingTask ? "grid-cols-1" : "grid-cols-3")}>
+            <TabsTrigger value="task">{editingTask ? "任务详情" : "任务"}</TabsTrigger>
+            {!editingTask && <TabsTrigger value="project">项目</TabsTrigger>}
+            {!editingTask && <TabsTrigger value="goal">目标</TabsTrigger>}
           </TabsList>
           <TabsContent value="task" className="mt-4">
             <TaskFormFields
               key={taskFormKey}
+              initialData={editingTask ? {
+                  ...editingTask, 
+                  priority: editingTask.priority 
+              } : undefined}
               availableProjects={availableProjects}
               availableActivityCategories={availableActivityCategories}
               onSave={handleSaveTask}
               onCancel={handleCancel}
               onCreateNewProjectInForm={handleCreateNewProjectForTaskForm}
-              submitButtonText="创建任务"
+              submitButtonText={editingTask ? "保存更改" : "创建任务"}
               showCancelButton={true}
             />
           </TabsContent>
-          <TabsContent value="project" className="mt-4">
-            <ProjectFormFields
-              key={projectFormKey}
-              availableGoals={availableGoals}
-              onSave={handleSaveProject}
-              onCancel={handleCancel}
-              submitButtonText="创建项目"
-              showCancelButton={true}
-              formId="unified-add-project"
-            />
-          </TabsContent>
-          <TabsContent value="goal" className="mt-4">
-            <GoalFormFields
-              key={goalFormKey}
-              onSave={handleSaveGoal}
-              onCancel={handleCancel}
-              submitButtonText="创建目标"
-              showCancelButton={true}
-              formId="unified-add-goal"
-            />
-          </TabsContent>
+          {!editingTask && (
+            <>
+              <TabsContent value="project" className="mt-4">
+                <ProjectFormFields
+                  key={projectFormKey}
+                  availableGoals={availableGoals}
+                  onSave={handleSaveProject}
+                  onCancel={handleCancel}
+                  submitButtonText="创建项目"
+                  showCancelButton={true}
+                  formId="unified-add-project"
+                />
+              </TabsContent>
+              <TabsContent value="goal" className="mt-4">
+                <GoalFormFields
+                  key={goalFormKey}
+                  onSave={handleSaveGoal}
+                  onCancel={handleCancel}
+                  submitButtonText="创建目标"
+                  showCancelButton={true}
+                  formId="unified-add-goal"
+                />
+              </TabsContent>
+            </>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>

@@ -81,7 +81,7 @@ interface CapsuleButtonProps {
 
 const CapsuleButton: React.FC<CapsuleButtonProps> = ({ label, onClick, isSelected, className, icon, color, count, dotColor }) => {
   const priorityColors = {
-    "important-urgent": {
+    "importantUrgent": {
       bg: "bg-red-500",
       text: "text-white",
       lightBg: "bg-red-50 dark:bg-red-900/30",
@@ -89,7 +89,7 @@ const CapsuleButton: React.FC<CapsuleButtonProps> = ({ label, onClick, isSelecte
       lightBorder: "border-red-200 dark:border-red-700",
       hover: "hover:bg-red-100 dark:hover:bg-red-800/50",
     },
-    "important-not-urgent": {
+    "importantNotUrgent": {
       bg: "bg-amber-500",
       text: "text-black",
       lightBg: "bg-amber-50 dark:bg-amber-900/30",
@@ -97,7 +97,7 @@ const CapsuleButton: React.FC<CapsuleButtonProps> = ({ label, onClick, isSelecte
       lightBorder: "border-amber-200 dark:border-amber-700",
       hover: "hover:bg-amber-100 dark:hover:bg-amber-800/50",
     },
-    "not-important-urgent": {
+    "notImportantUrgent": {
       bg: "bg-blue-500",
       text: "text-white",
       lightBg: "bg-blue-50 dark:bg-blue-900/30",
@@ -105,7 +105,7 @@ const CapsuleButton: React.FC<CapsuleButtonProps> = ({ label, onClick, isSelecte
       lightBorder: "border-blue-200 dark:border-blue-700",
       hover: "hover:bg-blue-100 dark:hover:bg-blue-800/50",
     },
-    "not-important-not-urgent": {
+    "notImportantNotUrgent": {
       bg: "bg-green-500",
       text: "text-white",
       lightBg: "bg-green-50 dark:bg-green-900/30",
@@ -234,10 +234,10 @@ export const TaskFilterSidebar: React.FC<TaskFilterSidebarProps> = ({
   }, [allTags, tagSearch, tagCounts]);
 
   const priorityOptions: { label: string; value: TaskPriority; color?: string }[] = [
-    { label: "重要且紧急", value: "important-urgent", color: "important-urgent" },
-    { label: "重要不紧急", value: "important-not-urgent", color: "important-not-urgent" },
-    { label: "不重要紧急", value: "not-important-urgent", color: "not-important-urgent" },
-    { label: "不重要不紧急", value: "not-important-not-urgent", color: "not-important-not-urgent" },
+    { label: "重要且紧急", value: "importantUrgent", color: "importantUrgent" },
+    { label: "重要不紧急", value: "importantNotUrgent", color: "importantNotUrgent" },
+    { label: "不重要紧急", value: "notImportantUrgent", color: "notImportantUrgent" },
+    { label: "不重要不紧急", value: "notImportantNotUrgent", color: "notImportantNotUrgent" },
   ];
 
   const viewOptions = [

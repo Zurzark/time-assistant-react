@@ -244,10 +244,10 @@ export function useTaskFiltersAndSort({
         return [...filteredTasks].sort((a, b) => {
             if (sortBy === "priority") {
                 const priorityOrder: Record<TaskPriority, number> = {
-                    "important-urgent": 0,
-                    "important-not-urgent": 1,
-                    "not-important-urgent": 2,
-                    "not-important-not-urgent": 3,
+                    "importantUrgent": 0,
+                    "importantNotUrgent": 1,
+                    "notImportantUrgent": 2,
+                    "notImportantNotUrgent": 3,
                 };
                 return priorityOrder[a.priority] - priorityOrder[b.priority];
             } else if (sortBy === "dueDate") {
@@ -304,10 +304,10 @@ export function useTaskFiltersAndSort({
 
     const getTranslatedPriorityName = useCallback((priority: TaskPriority): string => {
         switch (priority) {
-            case 'important-urgent': return '重要且紧急';
-            case 'important-not-urgent': return '重要不紧急';
-            case 'not-important-urgent': return '紧急不重要';
-            case 'not-important-not-urgent': return '不重要不紧急';
+            case 'importantUrgent': return '重要且紧急';
+            case 'importantNotUrgent': return '重要不紧急';
+            case 'notImportantUrgent': return '紧急不重要';
+            case 'notImportantNotUrgent': return '不重要不紧急';
             default: return '';
         }
     }, []);
@@ -359,10 +359,10 @@ export function useTaskFiltersAndSort({
 
         if (selectedPriorities.length > 0) {
             const priorityLabels = selectedPriorities.map(p => {
-                if (p === 'important-urgent') return '重要且紧急';
-                if (p === 'important-not-urgent') return '重要不紧急';
-                if (p === 'not-important-urgent') return '不重要紧急';
-                if (p === 'not-important-not-urgent') return '不重要不紧急';
+                if (p === 'importantUrgent') return '重要且紧急';
+                if (p === 'importantNotUrgent') return '重要不紧急';
+                if (p === 'notImportantUrgent') return '不重要紧急';
+                if (p === 'notImportantNotUrgent') return '不重要不紧急';
                 return '';
             }).filter(Boolean);
             if (priorityLabels.length > 0) {

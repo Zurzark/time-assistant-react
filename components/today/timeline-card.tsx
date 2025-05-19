@@ -47,12 +47,12 @@ import { cn } from "@/lib/utils"
 import { type TimeBlock as DBTimeBlock, ObjectStores, getByIndex as getDBByIndex, remove as removeDB, add as addDB, update as updateDB, get as getDBItem, FixedBreakRule, getAll as getAllDB, ActivityCategory, Task } from "@/lib/db"
 import { useToast } from "@/components/ui/use-toast"
 import TimeBlockEntryModal, { TimeBlockModalMode } from "@/components/time/time-block-entry-modal"
-import { differenceInMinutes, format as formatDateFns } from 'date-fns';
+import { differenceInMinutes, format as formatDateFns, addDays, parseISO as dateFnsParseISO } from 'date-fns';
 import TimelineBlockItemContent, { UITimeBlock as TimelineUITimeBlock } from "@/components/time/timeline-block-item-content";
 
 const getTodayDateString = () => {
   const today = new Date();
-  return today.toISOString().split('T')[0];
+  return formatDateFns(today, "yyyy-MM-dd");
 };
 
 const formatTime = (date: Date | string) => {
@@ -78,7 +78,7 @@ const SOURCE_TYPE_OPTIONS = [
 type SourceTypeOptionValue = typeof SOURCE_TYPE_OPTIONS[number]['value'];
 
 interface TimelineCardProps {
-  onPomodoroClick: (taskId: string, taskTitle: string) => void;
+  onPomodoroClick: (taskId: number, taskTitle: string) => void;
 }
 
 export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
@@ -98,13 +98,15 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const cardContentRef = useRef<HTMLDivElement>(null);
   const [indicatorPosition, setIndicatorPosition] = useState(0);
 
-  const todayDateString = getTodayDateString();
+  const todayDateStringForUI = getTodayDateString();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchTimeBlocks = useCallback(async () => {
-    console.log(`fetchTimeBlocks triggered. Lock status: ${isProcessingFixedBreaksRef.current}`);
+    const currentFreshTodayDateString = getTodayDateString();
+    console.log(`fetchTimeBlocks triggered for ${currentFreshTodayDateString}. Lock status: ${isProcessingFixedBreaksRef.current}`);
+    
     if (isProcessingFixedBreaksRef.current) {
-      console.warn("fetchTimeBlocks: Processing already in progress by another operation. Skipping this call to avoid conflict.");
+      console.warn("fetchTimeBlocks: Processing already in progress. Skipping this call.");
       return;
     }
 
@@ -112,8 +114,11 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     setError(null);
 
     try {
-      const todayDateObj = new Date(todayDateString + 'T00:00:00');
-      const dayOfWeekToday = todayDateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+      const todayStartUTC = new Date(currentFreshTodayDateString + 'T00:00:00.000Z');
+      const todayEndUTC = new Date(currentFreshTodayDateString + 'T23:59:59.999Z');
+      
+      const localDateParts = currentFreshTodayDateString.split('-').map(Number);
+      const localTodayStart = new Date(localDateParts[0], localDateParts[1] - 1, localDateParts[2], 0, 0, 0, 0);
 
       const [allFixedRules, categories, dbTasks] = await Promise.all([
         getAllDB<FixedBreakRule>(ObjectStores.FIXED_BREAK_RULES),
@@ -123,13 +128,27 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       setActivityCategories(categories);
       setTasks(dbTasks);
 
+      const dayOfWeekToday = localTodayStart.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+      
+      const dateRangeForCandidateBlocks = [
+        formatDateFns(addDays(todayStartUTC, -1), "yyyy-MM-dd"), 
+        currentFreshTodayDateString, 
+        formatDateFns(addDays(todayStartUTC, 1), "yyyy-MM-dd")  
+      ];
+      
+      let candidateDbBlocks: DBTimeBlock[] = [];
+      for (const dateStr of dateRangeForCandidateBlocks) {
+        const blocksForDate = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', dateStr);
+        candidateDbBlocks.push(...blocksForDate);
+      }
+      candidateDbBlocks = Array.from(new Map(candidateDbBlocks.map(block => [block.id, block])).values());
+
       const activeRulesForToday = allFixedRules.filter(rule =>
         rule.isEnabled &&
         rule.daysOfWeek &&
         rule.daysOfWeek.includes(dayOfWeekToday)
       );
 
-      const initialExistingBlocks = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayDateString);
       const blocksToAdd: Omit<DBTimeBlock, 'id'>[] = [];
       const processedFixedBreakIdsInThisRun = new Set<string>(); 
 
@@ -139,24 +158,24 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
         if (processedFixedBreakIdsInThisRun.has(fixedBreakIdStr)) continue; 
 
-        const alreadyExistsInInitialLoad = initialExistingBlocks.some(
-          block => block.fixedBreakId === fixedBreakIdStr && 
-                   block.sourceType === 'fixed_break' &&
-                   block.date === todayDateString
+        const alreadyExistsAsTodayBlock = candidateDbBlocks.some(block =>
+            block.fixedBreakId === fixedBreakIdStr &&
+            block.sourceType === 'fixed_break' &&
+            new Date(block.startTime) >= todayStartUTC && new Date(block.startTime) < addDays(todayStartUTC,1) 
         );
 
-        if (!alreadyExistsInInitialLoad) {
+        if (!alreadyExistsAsTodayBlock) {
           const [startHour, startMinute] = rule.startTime.split(':').map(Number);
           const [endHour, endMinute] = rule.endTime.split(':').map(Number);
 
-          let startTime = new Date(todayDateObj); 
+          let startTime = new Date(localTodayStart);
           startTime.setHours(startHour, startMinute, 0, 0);
 
-          let endTime = new Date(todayDateObj); 
+          let endTime = new Date(localTodayStart);
           endTime.setHours(endHour, endMinute, 0, 0);
           
           if (endTime.getTime() <= startTime.getTime()) {
-              console.warn(`Invalid fixed break rule (end <= start): ${rule.label || rule.id} for ${todayDateString}`);
+              console.warn(`Fixed break rule "${rule.label || rule.id}" (${rule.startTime}-${rule.endTime}) on ${currentFreshTodayDateString} results in invalid/inverted time. Skipping.`);
               continue;
           }
 
@@ -164,11 +183,11 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
             title: rule.label || "固定休息",
             sourceType: 'fixed_break',
             activityCategoryId: undefined,
-            startTime: startTime,
-            endTime: endTime,
+            startTime: startTime, 
+            endTime: endTime,    
             isLogged: 0,
             notes: undefined,
-            date: todayDateString,
+            date: currentFreshTodayDateString, 
             fixedBreakId: fixedBreakIdStr,
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -181,37 +200,54 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       if (blocksToAdd.length > 0) {
         for (const payload of blocksToAdd) {
           try {
-            await addDB(ObjectStores.TIME_BLOCKS, payload);
+            const newId = await addDB(ObjectStores.TIME_BLOCKS, payload);
+            const newBlockFromDB = await getDBItem<DBTimeBlock>(ObjectStores.TIME_BLOCKS, newId);
+            if(newBlockFromDB) candidateDbBlocks.push(newBlockFromDB);
           } catch (addError) {
             console.error(`Failed to add fixed break from rule '${payload.title}' to DB:`, addError);
           }
         }
+        candidateDbBlocks = Array.from(new Map(candidateDbBlocks.map(block => [block.id, block])).values());
       }
 
-      const allTodayDbBlocksFromDB = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayDateString);
       const validRuleIdsFromSettings = new Set(allFixedRules.map(rule => String(rule.id)));
       const blocksToRemoveIds: number[] = [];
 
-      const filteredAndProcessedBlocks = allTodayDbBlocksFromDB
+      const filteredAndProcessedBlocks = candidateDbBlocks
         .filter(block => {
-          const blockStartTime = new Date(block.startTime);
-          const blockEndTime = new Date(block.endTime);
-          const actualBlockStartTime = block.actualStartTime ? new Date(block.actualStartTime) : null;
-          const actualBlockEndTime = block.actualEndTime ? new Date(block.actualEndTime) : null;
+          const blockStartTime = new Date(block.startTime); 
+          const blockEndTime = new Date(block.endTime);  
 
-          const todayStart = new Date(todayDateString + 'T00:00:00.000');
-          const todayEnd = new Date(todayDateString + 'T23:59:59.999');
-
-          let relevantStartTime = block.isLogged && actualBlockStartTime ? actualBlockStartTime : blockStartTime;
-          let relevantEndTime = block.isLogged && actualBlockEndTime ? actualBlockEndTime : blockEndTime;
+          if (block.title === "记录" || (block.id === 45 && block.date === "2025-05-19")) { 
+            console.log(`TimelineCard Filter Debug for block "${block.title}" (ID: ${block.id}, DBDate: ${block.date}):`);
+            console.log(`  block.startTime (raw from DB): ${block.startTime}`);
+            console.log(`  block.endTime (raw from DB): ${block.endTime}`);
+            console.log(`  blockStartTime (JS Date obj): ${blockStartTime.toISOString()} (Local: ${blockStartTime.toString()})`);
+            console.log(`  blockEndTime (JS Date obj): ${blockEndTime.toISOString()} (Local: ${blockEndTime.toString()})`);
+            console.log(`  Using currentFreshTodayDateString for filtering: ${currentFreshTodayDateString}`); 
+            console.log(`  todayStartUTC (for filtering): ${todayStartUTC.toISOString()} (Local: ${new Date(todayStartUTC.getFullYear(), todayStartUTC.getUTCMonth(), todayStartUTC.getUTCDate(), 0,0,0).toString()})`);
+            console.log(`  todayEndUTC (for filtering): ${todayEndUTC.toISOString()} (Local: ${new Date(todayEndUTC.getFullYear(), todayEndUTC.getUTCMonth(), todayEndUTC.getUTCDate(), 23,59,59,999).toString()})`);
+            const condition1 = blockStartTime < todayEndUTC;
+            const condition2 = blockEndTime > todayStartUTC;
+            console.log(`  Condition1 (blockStartTime < todayEndUTC): ${condition1}`);
+            console.log(`  Condition2 (blockEndTime > todayStartUTC): ${condition2}`);
+            console.log(`  Overall overlapsToday evaluation: ${condition1 && condition2}`);
+          }
           
-          const overlapsToday = relevantStartTime <= todayEnd && relevantEndTime >= todayStart;
+          const overlapsToday = blockStartTime < todayEndUTC && blockEndTime > todayStartUTC;
           
-          if (!overlapsToday) return false;
+          if (!overlapsToday) {
+            if (block.fixedBreakId && block.sourceType === 'fixed_break' && block.date === currentFreshTodayDateString) { 
+                if(!validRuleIdsFromSettings.has(block.fixedBreakId)) {
+                    if (block.id !== undefined) blocksToRemoveIds.push(block.id);
+                }
+            }
+            return false;
+          }
 
           if (block.fixedBreakId && block.sourceType === 'fixed_break') {
             if (!validRuleIdsFromSettings.has(block.fixedBreakId)) {
-              console.warn(`Orphaned fixed break block found (ID: ${block.id}, fixedBreakId: ${block.fixedBreakId}, Title: ${block.title}). Scheduled for removal.`);
+              console.warn(`Orphaned fixed break block (ID: ${block.id}, fixedBreakId: ${block.fixedBreakId}, Title: ${block.title}) that overlaps today. Scheduled for removal.`);
               if (block.id !== undefined) {
                 blocksToRemoveIds.push(block.id);
               }
@@ -264,7 +300,8 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       }
       console.log("fetchTimeBlocks finished. Lock released.");
     }
-  }, [todayDateString, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast]);
 
   const loadingRef = useRef(false);
 
@@ -371,12 +408,13 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   };
 
   const handleOpenAddModal = () => {
+    const currentTodayForModal = getTodayDateString();
     const now = new Date();
     let suggestedStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0, 0);
     if (timeBlocks.length > 0) {
         const lastBlockEndTime = new Date(timeBlocks[timeBlocks.length - 1].endTime);
-        if (lastBlockEndTime.getDate() === now.getDate()) {
-            suggestedStartTime = lastBlockEndTime;
+        if (formatDateFns(lastBlockEndTime, "yyyy-MM-dd") === currentTodayForModal) {
+             suggestedStartTime = lastBlockEndTime;
         }
     }
     if (suggestedStartTime < now) {
@@ -393,7 +431,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     const oneHourLater = new Date(suggestedStartTime.getTime() + 60 * 60 * 1000);
 
     setExternalModalInitialData({
-      date: todayDateString,
+      date: currentTodayForModal,
       startTime: suggestedStartTime,
       endTime: oneHourLater,
       isLogged: 0,
@@ -443,17 +481,16 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   };
 
   const handleStartPomodoroForBlock = async (blockTaskId: number | string | undefined, blockTitle: string) => {
-    if (!blockTaskId) {
-      toast({ title: "错误", description: "此时间块未关联任何任务。", variant: "destructive" });
+    if (blockTaskId === undefined) {
+      toast({ title: "错误", description: "此时间块没有关联的任务ID，无法启动番茄钟。", variant: "destructive" });
       return;
     }
-    try {
-      const taskIdStr = typeof blockTaskId === 'number' ? String(blockTaskId) : blockTaskId;
-      onPomodoroClick(taskIdStr, blockTitle);
-    } catch (error) {
-        console.error("Error starting pomodoro for block's task:", error);
-        toast({ title: "错误", description: "无法启动专注，关联的任务可能不存在。", variant: "destructive"});
+    const numericTaskId = typeof blockTaskId === 'string' ? parseInt(blockTaskId, 10) : blockTaskId;
+    if (isNaN(numericTaskId)) {
+        toast({ title: "错误", description: "无效的任务ID格式。", variant: "destructive" });
+        return;
     }
+    onPomodoroClick(numericTaskId, blockTitle);
   };
 
   if (loading && timeBlocks.length === 0 && !error) {
@@ -513,7 +550,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       </CardHeader>
       <CardContent ref={cardContentRef} className="pb-2 flex-grow overflow-y-auto relative">
         {/* Past Time Mask */}
-        {new Date().toISOString().split('T')[0] === todayDateString && !loading && timeBlocks.length > 0 && (
+        {getTodayDateString() === todayDateStringForUI && !loading && timeBlocks.length > 0 && (
           <div
             className="absolute top-0 left-0 right-0 bg-gray-500/15 dark:bg-gray-600/20 z-[5] pointer-events-none"
             style={{ height: `${indicatorPosition}px` }}
@@ -522,7 +559,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         )}
 
         {/* Current Time Indicator */}
-        {new Date().toISOString().split('T')[0] === todayDateString && !loading && (
+        {getTodayDateString() === todayDateStringForUI && !loading && (
           <div
             className="absolute left-0 right-0 h-0.5 bg-blue-500/75 z-10 transition-all duration-300 ease-linear pointer-events-none"
             style={{ top: `${indicatorPosition}px` }}
@@ -602,7 +639,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           onSubmitSuccess={handleExternalModalSubmitSuccess}
           mode={externalModalMode}
           initialData={externalModalInitialData}
-          selectedDate={new Date(todayDateString)}
+          selectedDate={new Date(todayDateStringForUI)}
           tasks={tasks}
           activityCategories={activityCategories}
         />

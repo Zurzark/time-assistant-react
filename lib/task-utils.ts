@@ -1,13 +1,16 @@
 import { Task as DBTaskType } from "@/lib/db";
 
-export type TaskPriority = "important-urgent" | "important-not-urgent" | "not-important-urgent" | "not-important-not-urgent";
+// 该模块定义了与任务相关的类型、常量和工具函数，用于在UI层和数据库层之间转换任务数据。
+
+// 统一优先级定义，与 db.ts 和 UIPriority 一致
+export type TaskPriority = "importantUrgent" | "importantNotUrgent" | "notImportantUrgent" | "notImportantNotUrgent";
 export type TaskCategory = "next_action" | "someday_maybe" | "waiting_for";
 
 export interface Task {
   id: number;
   title: string;
   description?: string;
-  priority: TaskPriority;
+  priority: TaskPriority; // 已更新为驼峰式
   projectId?: number;
   completed: boolean;
   isFrog: boolean;
@@ -28,21 +31,25 @@ export interface Task {
 
 export const NO_PROJECT_VALUE = "NO_PROJECT";
 
+// 由于 TaskPriority 已与 DBTaskType['priority'] 统一，这些映射不再需要直接转换不同格式。
+// 保留这些常量可能用于其他逻辑，或可以移除。为简化，暂时注释掉，后续可根据需要恢复或移除。
+/*
 // Mapping from UI priority to DB priority string literal type
 export const priorityMapToDB: Record<TaskPriority, NonNullable<DBTaskType['priority']>> = {
-  "important-urgent": "importantUrgent",
-  "important-not-urgent": "importantNotUrgent",
-  "not-important-urgent": "notImportantUrgent",
-  "not-important-not-urgent": "notImportantNotUrgent",
+  "importantUrgent": "importantUrgent",
+  "importantNotUrgent": "importantNotUrgent",
+  "notImportantUrgent": "notImportantUrgent",
+  "notImportantNotUrgent": "notImportantNotUrgent",
 };
 
 // Mapping from DB priority string literal type to UI priority
 export const priorityMapFromDB: Record<NonNullable<DBTaskType['priority']>, TaskPriority> = {
-  importantUrgent: "important-urgent",
-  importantNotUrgent: "important-not-urgent",
-  notImportantUrgent: "not-important-urgent",
-  notImportantNotUrgent: "not-important-not-urgent",
+  importantUrgent: "importantUrgent",
+  importantNotUrgent: "importantNotUrgent",
+  notImportantUrgent: "notImportantUrgent",
+  notImportantNotUrgent: "notImportantNotUrgent",
 };
+*/
 
 export const fromDBTaskShape = (dbTask: DBTaskType): Task => {
   if (!dbTask || typeof dbTask.id === 'undefined') {
@@ -53,7 +60,8 @@ export const fromDBTaskShape = (dbTask: DBTaskType): Task => {
     id: dbTask.id,
     title: dbTask.title,
     description: dbTask.description || "",
-    priority: priorityMapFromDB[dbTask.priority || 'notImportantNotUrgent'],
+    // 直接使用，因为类型已统一
+    priority: dbTask.priority || 'notImportantNotUrgent', 
     projectId: dbTask.projectId,
     completed: dbTask.completed === 1,
     isFrog: dbTask.isFrog === 1,
@@ -82,7 +90,8 @@ export const toDBTaskShape = (task: Partial<Task>): Partial<Omit<DBTaskType, 'id
 
   if (task.hasOwnProperty('title') && typeof task.title === 'string') dbShape.title = task.title;
   if (task.hasOwnProperty('description') && typeof task.description === 'string') dbShape.description = task.description;
-  if (task.priority) dbShape.priority = priorityMapToDB[task.priority];
+  // 直接使用，因为类型已统一
+  if (task.priority) dbShape.priority = task.priority; 
   
   if (typeof task.isFrog === 'boolean') dbShape.isFrog = task.isFrog ? 1 : 0;
   if (task.tags) dbShape.tags = task.tags;

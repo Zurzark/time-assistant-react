@@ -84,7 +84,7 @@ export function TaskBoardView(props: TaskBoardViewProps) {
     const quadrants: QuadrantConfig[] = [
         {
             title: "重要且紧急",
-            priority: "important-urgent",
+            priority: "importantUrgent",
             icon: <AlertCircle className="h-4 w-4 mr-2 text-red-500" />,
             bgClass: "bg-red-50 dark:bg-red-950/30",
             borderClass: "border-red-200 dark:border-red-800",
@@ -92,7 +92,7 @@ export function TaskBoardView(props: TaskBoardViewProps) {
         },
         {
             title: "重要不紧急",
-            priority: "important-not-urgent",
+            priority: "importantNotUrgent",
             icon: <Clock className="h-4 w-4 mr-2 text-amber-500" />,
             bgClass: "bg-amber-50 dark:bg-amber-950/30",
             borderClass: "border-amber-200 dark:border-amber-800",
@@ -100,7 +100,7 @@ export function TaskBoardView(props: TaskBoardViewProps) {
         },
         {
             title: "不重要但紧急",
-            priority: "not-important-urgent",
+            priority: "notImportantUrgent",
             icon: <AlertTriangle className="h-4 w-4 mr-2 text-blue-500" />,
             bgClass: "bg-blue-50 dark:bg-blue-950/30",
             borderClass: "border-blue-200 dark:border-blue-800",
@@ -108,7 +108,7 @@ export function TaskBoardView(props: TaskBoardViewProps) {
         },
         {
             title: "不重要不紧急",
-            priority: "not-important-not-urgent",
+            priority: "notImportantNotUrgent",
             icon: <XCircle className="h-4 w-4 mr-2 text-green-500" />,
             bgClass: "bg-green-50 dark:bg-green-950/30",
             borderClass: "border-green-200 dark:border-green-800",

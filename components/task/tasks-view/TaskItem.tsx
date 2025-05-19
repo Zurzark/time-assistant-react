@@ -35,7 +35,7 @@ import {
     Hourglass, // 用于等待中
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, isPast, isToday } from 'date-fns';
+import { format, isPast, isToday, differenceInDays, startOfDay, isFuture } from 'date-fns';
 
 interface TaskItemProps {
     task: Task;
@@ -53,10 +53,10 @@ interface TaskItemProps {
 
 const PriorityDisplay: React.FC<{ priority: TaskPriority | undefined }> = ({ priority }) => {
     const priorityStyles: Record<TaskPriority, { color: string; text: string; dotColor: string }> = {
-        "important-urgent": { color: "text-red-600 dark:text-red-400", text: "重要且紧急", dotColor: "bg-red-500" },
-        "important-not-urgent": { color: "text-amber-600 dark:text-amber-400", text: "重要不紧急", dotColor: "bg-amber-500" },
-        "not-important-urgent": { color: "text-blue-600 dark:text-blue-400", text: "不重要紧急", dotColor: "bg-blue-500" },
-        "not-important-not-urgent": { color: "text-green-600 dark:text-green-400", text: "不重要不紧急", dotColor: "bg-green-500" },
+        "importantUrgent": { color: "text-red-600 dark:text-red-400", text: "重要且紧急", dotColor: "bg-red-500" },
+        "importantNotUrgent": { color: "text-amber-600 dark:text-amber-400", text: "重要不紧急", dotColor: "bg-amber-500" },
+        "notImportantUrgent": { color: "text-blue-600 dark:text-blue-400", text: "不重要紧急", dotColor: "bg-blue-500" },
+        "notImportantNotUrgent": { color: "text-green-600 dark:text-green-400", text: "不重要不紧急", dotColor: "bg-green-500" },
     };
     if (!priority || !priorityStyles[priority]) return null;
     const style = priorityStyles[priority];
@@ -198,6 +198,27 @@ export function TaskItem({
                                 >
                                     {task.isFrog && <span role="img" aria-label="frog" className="mr-1">🐸</span>}
                                     {task.title}
+                                    {/* "即将到期" (1-2 days away) visual cue - Moved to be next to title */}
+                                    {task.dueDate && !task.completed && !isOverdue && (() => {
+                                        const today = startOfDay(new Date());
+                                        const dueDateObj = new Date(task.dueDate);
+                                        const dueDateStart = startOfDay(dueDateObj);
+                                        
+                                        if (isFuture(dueDateStart) || isToday(dueDateStart)) {
+                                            const daysDiff = differenceInDays(dueDateStart, today);
+                                            if (daysDiff >= 0 && daysDiff <= 2) { // Today, Tomorrow or Day after tomorrow
+                                                return (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="ml-2 !text-xs border-orange-500 text-orange-600 bg-orange-50 dark:border-orange-400 dark:text-orange-300 dark:bg-orange-900/40 px-1.5 py-0.5"
+                                                    >
+                                                        {daysDiff === 0 ? "今日到期" : daysDiff === 1 ? "明日到期" : "即将到期"}
+                                                    </Badge>
+                                                );
+                                            }
+                                        }
+                                        return null;
+                                    })()}
                                 </h3>
                             </div>
                             <div className="flex items-center space-x-1 flex-shrink-0" data-no-edit-on-click="true">
@@ -259,7 +280,8 @@ export function TaskItem({
                                         <Calendar className="h-3.5 w-3.5 mr-1" />
                                         {format(task.dueDate, 'yyyy/MM/dd')} (截止)
                                         {isOverdue && <AlertTriangle className="h-3.5 w-3.5 ml-1 text-red-500" />}
-                                        {isToday(task.dueDate) && !task.completed && <Badge variant="outline" className="ml-1.5 !text-xs border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-300 px-1 py-0">今日</Badge>}
+                                        
+                                        {isToday(new Date(task.dueDate)) && !task.completed && !isOverdue && <Badge variant="outline" className="ml-1.5 !text-xs border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-300 px-1 py-0">今日到期</Badge>}
                                     </span>
                                 )}
                                 {task.projectId && (
@@ -406,8 +428,31 @@ export function TaskItem({
                                     isOverdue && "!border-red-500 dark:!border-red-600 !text-red-600 dark:!text-red-500 !bg-red-50 dark:!bg-red-900/40"
                                 )}>
                                     <Calendar className="h-3 w-3 mr-1" />
-                                    {format(task.dueDate, 'MM/dd')} (截止)
-                                    {isToday(task.dueDate) && !task.completed && <span className="ml-1 font-medium text-blue-600 dark:text-blue-400">(今日)</span>}
+                                    {format(new Date(task.dueDate), 'MM/dd')} (截止)
+                                    
+                                    {/* "即将到期" (1-2 days away) visual cue - REMOVED FROM HERE */}
+                                    {/* {task.dueDate && !task.completed && !isOverdue && (() => {
+                                        const today = startOfDay(new Date());
+                                        const dueDateObj = new Date(task.dueDate);
+                                        const dueDateStart = startOfDay(dueDateObj);
+
+                                        if (isFuture(dueDateStart) || isToday(dueDateStart)) {
+                                            const daysDiff = differenceInDays(dueDateStart, today);
+                                            if (daysDiff === 1 || daysDiff === 2) {
+                                                return (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="ml-1 !text-xs border-orange-500 text-orange-600 bg-orange-50 dark:border-orange-400 dark:text-orange-300 dark:bg-orange-900/40 px-1 py-0"
+                                                    >
+                                                        即将到期
+                                                    </Badge>
+                                                );
+                                            }
+                                        }
+                                        return null;
+                                    })()} */}
+
+                                    {isToday(new Date(task.dueDate)) && !task.completed && !isOverdue && <span className="ml-1 font-medium text-blue-600 dark:text-blue-400">(今日)</span>}
                                 </Badge>
                             )}
                              {task.projectId && (
