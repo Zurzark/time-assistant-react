@@ -28,6 +28,8 @@ import { TaskFilterSidebar, DateFilterType } from "./task-filter-sidebar";
 
 // Import new hooks and components
 import { useTaskData } from "./tasks-view/hooks/useTaskData";
+// TODO: (ActivityCategories) 从后端获取活动类别数据，并通过 useTaskData 传递下来。需要定义 ActivityCategory 类型 (例如在 @/types 或 @/lib/db)。
+// import { ActivityCategory } from "@/types"; // 假设类型定义位置
 import { useTaskFiltersAndSort } from "./tasks-view/hooks/useTaskFiltersAndSort";
 import { useTaskSelection } from "./tasks-view/hooks/useTaskSelection";
 import { ActiveTasksDisplay } from "./tasks-view/ActiveTasksDisplay";
@@ -245,6 +247,7 @@ export function TasksView() {
               <TaskFormFields
                 key={createTaskFormKey}
                 availableProjects={projectList}
+                availableActivityCategories={[]} // TODO: (ActivityCategories) 此处应为从 useTaskData 获取的 activityCategories。目前暂时使用空数组以解决类型错误。
                 onSave={handleActualCreateTask}
                 onCancel={() => {
                   setIsCreateDialogOpen(false);

@@ -774,6 +774,7 @@ export interface TimeBlock {
   endTime: Date; // 预定结束时间 (包含日期和时间)
   actualStartTime?: Date; // 新增：实际开始时间
   actualEndTime?: Date; // 新增：实际结束时间
+  durationMinutes?: number; // 新增: 实际花费时长（分钟），当 actualStartTime/EndTime 不方便精确提供时
   isLogged: 0 | 1; // 新增：标记是否已记录为日志 (默认为0, 在创建时处理)
   notes?: string; // 新增：备注
   date: string; // YYYY-MM-DD格式，用于快速按天查询
@@ -849,3 +850,95 @@ export interface ActivityCategory {
   createdAt: Date;
   updatedAt: Date;
 }
+
+// 新增函数：根据日期获取已记录的时间块 (isLogged = 1)
+export const getLoggedTimeBlocksByDate = (targetDate: string): Promise<TimeBlock[]> => {
+  return new Promise(async (resolve, reject) => {
+    const { db, error } = await openDB();
+    if (error || !db) {
+      reject(error || new Error('无法打开数据库'));
+      return;
+    }
+    const transaction = db.transaction(ObjectStores.TIME_BLOCKS, 'readonly');
+    const store = transaction.objectStore(ObjectStores.TIME_BLOCKS);
+    // 假设 'byDate' 索引存在于 'date' 字段 (string YYYY-MM-DD)
+    // 并且 'byIsLogged' 索引存在于 'isLogged' 字段
+    // 由于 IndexedDB 标准 API 不易直接支持多索引AND查询，我们将获取日期匹配项后过滤
+    // 或者，如果 'isLogged' 字段基数较低（0或1），可以考虑先查isLogged=1，再过滤日期，但通常按日期查范围更小。
+    // 此处采用游标方式，在遍历日期匹配项时检查 isLogged 状态，更高效。
+
+    const dateIndex = store.index('byDate');
+    const request = dateIndex.openCursor(IDBKeyRange.only(targetDate));
+    const results: TimeBlock[] = [];
+
+    request.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        const timeBlock = cursor.value as TimeBlock;
+        if (timeBlock.isLogged === 1) {
+          results.push(timeBlock);
+        }
+        cursor.continue();
+      } else {
+        resolve(results);
+      }
+    };
+
+    request.onerror = () => {
+      console.error("Error fetching logged time blocks by date:", request.error);
+      reject(new Error('按日期查询已记录的时间块失败'));
+    };
+
+    transaction.oncomplete = () => {
+      db.close();
+    };
+
+    transaction.onerror = () => {
+      console.error("Transaction error fetching logged time blocks by date:", transaction.error);
+      reject(new Error('事务执行失败: 按日期查询已记录的时间块'));
+      // Ensure db is closed on transaction error as well if not already handled by oncomplete
+      // db.close(); // Be cautious about closing DB multiple times or if transaction auto-closes
+    };
+  });
+};
+
+// 新增函数：根据日期范围获取已记录的时间块 (isLogged = 1)
+export const getLoggedTimeBlocksByDateRange = (startDate: string, endDate: string): Promise<TimeBlock[]> => {
+  return new Promise(async (resolve, reject) => {
+    const { db, error } = await openDB();
+    if (error || !db) {
+      reject(error || new Error('无法打开数据库'));
+      return;
+    }
+    const transaction = db.transaction(ObjectStores.TIME_BLOCKS, 'readonly');
+    const store = transaction.objectStore(ObjectStores.TIME_BLOCKS);
+    const dateIndex = store.index('byDate'); // 确保 'byDate' 索引存在
+    // IDBKeyRange.bound(lower, upper, lowerOpen, upperOpen)
+    const request = dateIndex.openCursor(IDBKeyRange.bound(startDate, endDate, false, false));
+    const results: TimeBlock[] = [];
+
+    request.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        const timeBlock = cursor.value as TimeBlock;
+        if (timeBlock.isLogged === 1) {
+          results.push(timeBlock);
+        }
+        cursor.continue();
+      } else {
+        resolve(results);
+      }
+    };
+    request.onerror = () => {
+      console.error("Error fetching logged time blocks by date range:", request.error);
+      reject(new Error('按日期范围查询已记录的时间块失败'));
+    };
+    transaction.oncomplete = () => {
+      db.close();
+    };
+    transaction.onerror = () => {
+      console.error("Transaction error fetching logged time blocks by date range:", transaction.error);
+      reject(new Error('事务执行失败: 按日期范围查询已记录的时间块'));
+    };
+  });
+};

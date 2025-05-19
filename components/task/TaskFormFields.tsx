@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { CalendarIcon, InfoCircledIcon } from "@radix-ui/react-icons";
 import { format, addDays, getDay, formatISO } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Project as DBProject, Task as DBTask } from "@/lib/db";
+import { Project as DBProject, Task as DBTask, ActivityCategory } from "@/lib/db";
 import { NO_PROJECT_VALUE, TaskPriority as UtilTaskPriority } from "@/lib/task-utils";
 import { toast } from "sonner";
 import { 
@@ -31,6 +31,9 @@ export type TaskCategory = "next_action" | "someday_maybe" | "waiting_for";
 
 export type RecurrenceFrequency = "daily" | "weekly" | "monthly" | "yearly" | "workdays";
 export type RecurrenceEndsType = "never" | "on_date" | "after_occurrences";
+
+// A unique string value to represent no category selected in the dropdown
+const NO_ACTIVITY_CATEGORY_VALUE = "---no-activity-category---";
 
 export interface TaskFormData {
   title: string;
@@ -54,11 +57,13 @@ export interface TaskFormData {
   recurrenceEndsType?: RecurrenceEndsType;
   recurrenceEndDate?: Date;
   recurrenceCount?: number;
+  defaultActivityCategoryId?: number;
 }
 
 interface TaskFormFieldsProps {
   initialData?: Partial<TaskFormData & {priority: UIPriority}>;
   availableProjects: DBProject[];
+  availableActivityCategories: ActivityCategory[];
   onSave: (taskData: TaskFormData) => Promise<void>;
   onCancel: () => void;
   onCreateNewProjectInForm?: (name: string) => Promise<number | undefined>;
@@ -70,6 +75,7 @@ interface TaskFormFieldsProps {
 export function TaskFormFields({
   initialData,
   availableProjects,
+  availableActivityCategories = [],
   onSave,
   onCancel,
   onCreateNewProjectInForm,
@@ -105,6 +111,7 @@ export function TaskFormFields({
   const [recurrenceCount, setRecurrenceCount] = useState<number>(initialData?.recurrenceCount || 2);
   
   const [isFrog, setIsFrog] = useState<boolean>(initialData?.isFrog || false);
+  const [defaultActivityCategoryId, setDefaultActivityCategoryId] = useState<number | undefined>(initialData?.defaultActivityCategoryId);
 
   const [internalProjects, setInternalProjects] = useState<DBProject[]>(availableProjects);
 
@@ -140,6 +147,7 @@ export function TaskFormFields({
       setTags(initialData.tags || []);
       setEstimatedDurationHours(initialData.estimatedDurationHours || 0);
       setIsFrog(initialData.isFrog || false);
+      setDefaultActivityCategoryId(initialData.defaultActivityCategoryId);
       
       setIsRecurring(initialData.isRecurring || false);
       setRecurrenceFrequency(initialData.recurrenceFrequency || "daily");
@@ -206,6 +214,7 @@ export function TaskFormFields({
       recurrenceEndsType: isRecurring ? recurrenceEndsType : undefined,
       recurrenceEndDate: isRecurring && recurrenceEndsType === 'on_date' ? recurrenceEndDateVal : undefined,
       recurrenceCount: isRecurring && recurrenceEndsType === 'after_occurrences' ? recurrenceCount : undefined,
+      defaultActivityCategoryId: defaultActivityCategoryId,
     };
     await onSave(taskDataToSave);
   };
@@ -368,6 +377,45 @@ export function TaskFormFields({
             {estimatedPomodorosDisplay > 0 && (
                 <p className="text-xs text-muted-foreground mt-1">约 {estimatedPomodorosDisplay} 个番茄钟 (每个 {pomodoroDurationMinutes} 分钟)</p>
             )}
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`task-defaultActivityCategory-${initialData?.title || 'new'}`}>
+            默认活动分类 <span className="text-xs text-muted-foreground">(可选)</span>
+          </Label>
+          <Select
+            value={defaultActivityCategoryId ? String(defaultActivityCategoryId) : NO_ACTIVITY_CATEGORY_VALUE}
+            onValueChange={(value) => {
+              if (value === NO_ACTIVITY_CATEGORY_VALUE) {
+                setDefaultActivityCategoryId(undefined);
+              } else {
+                setDefaultActivityCategoryId(parseInt(value, 10));
+              }
+            }}
+          >
+            <SelectTrigger id={`task-defaultActivityCategory-${initialData?.title || 'new'}`}>
+              <SelectValue placeholder="选择分类 (可选)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_ACTIVITY_CATEGORY_VALUE}>无</SelectItem>
+              {availableActivityCategories.map((category) => (
+                category.id !== undefined && (
+                  <SelectItem key={category.id} value={String(category.id)}>
+                    <div className="flex items-center">
+                      {category.color && (
+                        <span 
+                          className="inline-block w-3 h-3 rounded-full mr-2 border border-border/50" 
+                          style={{ backgroundColor: category.color }}
+                        ></span>
+                      )}
+                      {/* Placeholder for icon if available in category.icon */}
+                      {/* {category.icon && <SomeIconComponent iconName={category.icon} className="mr-2 h-4 w-4" />} */}
+                      {category.name}
+                    </div>
+                  </SelectItem>
+                )
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
       <div className="space-y-3 pt-3 border-t border-border/40 mt-4">

@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Bell, Calendar, CheckSquare, Flag, Inbox, Plus, Search, Settings, Target, BarChart2 } from "lucide-react"
+import { Bell, Calendar, CheckSquare, Flag, Inbox, Plus, Search, Settings, Target, BarChart2, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
@@ -53,6 +53,15 @@ export function MainNav({ currentPath = "/" }: MainNavProps) {
             )}
           >
             任务
+          </Link>
+          <Link
+            href="/time-log"
+            className={cn(
+              "text-sm font-medium transition-colors hover:text-primary py-4",
+              currentPath === "/time-log" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground",
+            )}
+          >
+            时间
           </Link>
           <Link
             href="/goals"
@@ -131,9 +140,39 @@ export function MainNav({ currentPath = "/" }: MainNavProps) {
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem>
-                <Link href="/time-log" className="flex items-center w-full">
+                <Link href="/tasks" className="flex items-center w-full">
                   <CheckSquare className="mr-2 h-4 w-4" />
-                  <span>时间日志</span>
+                  <span>任务</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Link href="/time-log" className="flex items-center w-full">
+                  <Clock className="mr-2 h-4 w-4" />
+                  <span>时间</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Link href="/goals" className="flex items-center w-full">
+                  <Target className="mr-2 h-4 w-4" />
+                  <span>目标</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Link href="/projects" className="flex items-center w-full">
+                  <Flag className="mr-2 h-4 w-4" />
+                  <span>项目</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Link href="/calendar" className="flex items-center w-full">
+                  <Calendar className="mr-2 h-4 w-4" />
+                  <span>日历</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Link href="/analytics" className="flex items-center w-full">
+                  <BarChart2 className="mr-2 h-4 w-4" />
+                  <span>分析</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -195,6 +234,12 @@ export function MainNav({ currentPath = "/" }: MainNavProps) {
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem>
+                <Link href="/time-log" className="flex items-center w-full">
+                  <Clock className="mr-2 h-4 w-4" />
+                  <span>时间</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem>
                 <Link href="/goals" className="flex items-center w-full">
                   <Target className="mr-2 h-4 w-4" />
                   <span>目标</span>
@@ -225,13 +270,6 @@ export function MainNav({ currentPath = "/" }: MainNavProps) {
                   <span>每周回顾</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Link href="/time-log" className="flex items-center w-full">
-                  <CheckSquare className="mr-2 h-4 w-4" />
-                  <span>时间日志</span>
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
               <DropdownMenuItem>
                 <Link href="/settings" className="flex items-center w-full">
                   <Settings className="mr-2 h-4 w-4" />

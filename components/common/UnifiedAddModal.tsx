@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ObjectStores, add, getAll, Project as DBProject, Task as DBTask, Goal as DBGoal } from "@/lib/db";
+import { ObjectStores, add, getAll, Project as DBProject, Task as DBTask, Goal as DBGoal, ActivityCategory } from "@/lib/db";
 import { NO_PROJECT_VALUE, TaskPriority, toDBTaskShape } from "@/lib/task-utils";
 import { TaskCategory as UtilTaskCategory, UIPriority } from "../task/TaskFormFields";
 
@@ -22,6 +22,7 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
   const [activeTab, setActiveTab] = useState("task");
   const [availableProjects, setAvailableProjects] = useState<DBProject[]>([]);
   const [availableGoals, setAvailableGoals] = useState<DBGoal[]>([]);
+  const [availableActivityCategories, setAvailableActivityCategories] = useState<ActivityCategory[]>([]);
   
   const [taskFormKey, setTaskFormKey] = useState(() => `task-form-${Date.now()}`);
   const [projectFormKey, setProjectFormKey] = useState(() => `project-form-${Date.now()}`);
@@ -42,14 +43,16 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
   useEffect(() => {
     async function fetchData() {
       try {
-        const [projects, goals] = await Promise.all([
+        const [projects, goals, activityCategories] = await Promise.all([
           getAll<DBProject>(ObjectStores.PROJECTS),
           getAll<DBGoal>(ObjectStores.GOALS),
+          getAll<ActivityCategory>(ObjectStores.ACTIVITY_CATEGORIES),
         ]);
         setAvailableProjects(projects);
         setAvailableGoals(goals);
+        setAvailableActivityCategories(activityCategories);
       } catch (error) {
-        console.error("Failed to fetch projects or goals for modal:", error);
+        console.error("Failed to fetch initial data for modal:", error);
         toast.error("加载初始数据失败。");
       }
     }
@@ -121,6 +124,7 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
       recurrenceRule: taskData.recurrenceRule,
       recurrenceEndDate: taskData.recurrenceEndDate,
       recurrenceCount: taskData.recurrenceCount,
+      defaultActivityCategoryId: taskData.defaultActivityCategoryId,
       reminderDate: undefined,
       order: undefined,
       deletedAt: undefined,
@@ -223,6 +227,7 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
             <TaskFormFields
               key={taskFormKey}
               availableProjects={availableProjects}
+              availableActivityCategories={availableActivityCategories}
               onSave={handleSaveTask}
               onCancel={handleCancel}
               onCreateNewProjectInForm={handleCreateNewProjectForTaskForm}
