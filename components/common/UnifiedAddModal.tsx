@@ -5,7 +5,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { ObjectStores, add, getAll, Project as DBProject, Task as DBTask, Goal as DBGoal } from "@/lib/db";
-import { NO_PROJECT_VALUE } from "@/lib/task-utils";
+import { NO_PROJECT_VALUE, TaskPriority, toDBTaskShape } from "@/lib/task-utils";
+import { TaskCategory as UtilTaskCategory, UIPriority } from "../task/TaskFormFields";
 
 import { TaskFormFields, TaskFormData } from "../task/TaskFormFields";
 import { ProjectFormFields, ProjectFormData } from "../project/ProjectFormFields";
@@ -86,26 +87,49 @@ export function UnifiedAddModal({ open, onOpenChange, onSuccessfulCreate }: Unif
 
   const handleSaveTask = async (taskData: TaskFormData) => {
     const now = new Date();
-    const newTask: Omit<DBTask, 'id'> = {
+
+    const mapUiPriorityToStoragePriority = (uiPriority: UIPriority): NonNullable<DBTask['priority']> => {
+        switch (uiPriority) {
+            case "importantUrgent": return "importantUrgent";
+            case "importantNotUrgent": return "importantNotUrgent";
+            case "notImportantUrgent": return "notImportantUrgent";
+            case "notImportantNotUrgent": return "notImportantNotUrgent";
+            default: return "notImportantNotUrgent";
+        }
+    };
+
+    const newTaskDataForDb: Omit<DBTask, 'id'> = {
       title: taskData.title,
       description: taskData.description,
-      priority: taskData.priority,
+      priority: mapUiPriorityToStoragePriority(taskData.priority),
       dueDate: taskData.dueDate,
-      projectId: typeof taskData.projectId === 'string' && taskData.projectId === NO_PROJECT_VALUE ? undefined : (typeof taskData.projectId === 'string' ? parseInt(taskData.projectId) : taskData.projectId),
+      projectId: typeof taskData.projectId === 'string' && taskData.projectId === NO_PROJECT_VALUE 
+        ? undefined 
+        : (typeof taskData.projectId === 'string' ? parseInt(taskData.projectId) : taskData.projectId),
       tags: taskData.tags || [],
       isFrog: taskData.isFrog ? 1 : 0,
-      estimatedPomodoros: taskData.estimatedPomodoros || 0,
+      estimatedDurationHours: taskData.estimatedDurationHours || 0,
       completed: 0,
       createdAt: now,
       updatedAt: now,
       isDeleted: 0,
-      isRecurring: 0,
       actualPomodoros: 0,
       subtasks: [],
+      category: taskData.category,
+      plannedDate: taskData.plannedDate,
+      isRecurring: taskData.isRecurring ? 1 : 0,
+      recurrenceRule: taskData.recurrenceRule,
+      recurrenceEndDate: taskData.recurrenceEndDate,
+      recurrenceCount: taskData.recurrenceCount,
+      reminderDate: undefined,
+      order: undefined,
+      deletedAt: undefined,
+      goalId: undefined,
+      completedAt: undefined,
     };
 
     try {
-      await add(ObjectStores.TASKS, newTask);
+      await add(ObjectStores.TASKS, newTaskDataForDb);
       toast.success("任务已成功创建！", { duration: 6000 });
       resetTaskForm();
       onSuccessfulCreate?.();

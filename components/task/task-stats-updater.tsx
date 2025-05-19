@@ -126,10 +126,10 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
       const tasks = allTasks.map((task: DBTask) => ({
         id: task.id,
         title: task.title,
-        completed: task.completed,
+        completed: task.completed === 1, // 确保从 DBTask 的 0/1 转换为 boolean
         dueDate: task.dueDate,
         plannedDate: task.plannedDate,
-        isFrog: task.isFrog
+        isFrog: task.isFrog === 1 // 确保从 DBTask 的 0/1 转换为 boolean
       }));
       
       // 更新任务缓存
@@ -145,18 +145,31 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
       taskCompletionStatusRef.current = newCompletionStatus;
       
       // 计算当前时间范围的统计数据
-      calculateStatsForTimeRange(timeRange);
+      calculateStatsForTimeRange(timeRange); // calculateStatsForTimeRange 会使用 tasksRef.current
     } catch (error) {
       console.error('从IndexedDB加载任务数据失败:', error);
     } finally {
       setLoading(false);
     }
-  }, [timeRange]);
+  }, [timeRange]); // Removed calculateStatsForTimeRange from deps as it uses timeRange which is already a dep
   
   // 在组件挂载和时间范围变化时加载任务
   useEffect(() => {
     loadTasksFromDB();
-  }, [loadTasksFromDB]);
+  }, [loadTasksFromDB]); // loadTasksFromDB has timeRange as dependency
+
+  // 添加事件监听器以响应外部数据更改
+  useEffect(() => {
+    const handleDataChange = () => {
+      // console.log("TaskStatsProvider detected taskDataChangedForStats, reloading tasks for stats.");
+      loadTasksFromDB();
+    };
+
+    window.addEventListener('taskDataChangedForStats', handleDataChange);
+    return () => {
+      window.removeEventListener('taskDataChangedForStats', handleDataChange);
+    };
+  }, [loadTasksFromDB]); // loadTasksFromDB is stable or its dependencies are correctly handled
   
   // 根据当前选择的时间范围过滤任务并计算统计数据
   const calculateStatsForTimeRange = useCallback((range: TimeRange) => {
@@ -199,7 +212,7 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
         const task = await get<DBTask>(ObjectStores.TASKS, taskId);
         
         if (task) {
-          task.isDeleted = true;
+          task.isDeleted = 1; // Correct: 1 for true
           task.deletedAt = new Date();
           await update(ObjectStores.TASKS, task);
         }
@@ -218,10 +231,10 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
         // 创建新任务对象
         const newTask: Partial<DBTask> = {
         title: `Task ${taskId}`, // 这里应该有实际的任务标题
-        completed: completed,
-          isFrog: false,
-          isDeleted: false,
-          isRecurring: false,
+        completed: completed ? 1 : 0, // Correct: convert boolean to 0/1
+          isFrog: 0, // Default to false (0)
+          isDeleted: 0, // Default to false (0)
+          isRecurring: 0, // Default to false (0)
           createdAt: new Date(),
           updatedAt: new Date(),
         // 默认设置为今天作为截止日期
@@ -229,7 +242,7 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
         };
         
         // 添加到 IndexedDB
-        const newId = await add(ObjectStores.TASKS, newTask);
+        const newId = await add(ObjectStores.TASKS, newTask as DBTask); // Cast as DBTask for add
         
         // 使用返回的 ID 创建任务对象
         const taskForState = {
@@ -258,7 +271,7 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
         // 更新 IndexedDB
         const task = await get<DBTask>(ObjectStores.TASKS, taskId);
         if (task) {
-          task.completed = completed;
+          task.completed = completed ? 1 : 0; // Correct: convert boolean to 0/1
           if (completed) {
             task.completedAt = new Date();
           } else {
@@ -288,18 +301,18 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
           const newTask: Partial<DBTask> = {
             title: taskData.title,
             description: '',
-            completed: taskData.completed || false,
+            completed: (taskData.completed || false) ? 1 : 0, // Correct
             createdAt: new Date(),
             updatedAt: new Date(),
-            isFrog: taskData.isFrog || false,
-            isRecurring: false,
-            isDeleted: false,
+            isFrog: (taskData.isFrog || false) ? 1 : 0, // Correct
+            isRecurring: 0, // Assuming false as default, converted to 0
+            isDeleted: 0, // Assuming false as default, converted to 0
             dueDate: taskData.dueDate ? new Date(taskData.dueDate) : undefined,
             plannedDate: taskData.plannedDate ? new Date(taskData.plannedDate) : undefined,
           };
           
           // 添加到 IndexedDB
-          const newId = await add(ObjectStores.TASKS, newTask);
+          const newId = await add(ObjectStores.TASKS, newTask as DBTask); // Cast as DBTask for add
           
           // 更新本地任务 ID
           taskData.id = newId;
@@ -308,17 +321,17 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
           const existingTask = await get<DBTask>(ObjectStores.TASKS, taskData.id!);
           if (existingTask) {
             // 仅更新指定的字段
-            const updatedTask: Partial<DBTask> = {
-              ...existingTask,
+            const updatedTaskData: Partial<DBTask> = {
               title: taskData.title || existingTask.title,
-              completed: taskData.completed !== undefined ? taskData.completed : existingTask.completed,
+              completed: taskData.completed !== undefined ? (taskData.completed ? 1 : 0) : existingTask.completed, // Correct
               dueDate: taskData.dueDate ? new Date(taskData.dueDate) : existingTask.dueDate,
               plannedDate: taskData.plannedDate ? new Date(taskData.plannedDate) : existingTask.plannedDate,
-              isFrog: taskData.isFrog !== undefined ? taskData.isFrog : existingTask.isFrog,
+              isFrog: taskData.isFrog !== undefined ? (taskData.isFrog ? 1 : 0) : existingTask.isFrog, // Correct
               updatedAt: new Date(),
             };
-            
-            await update(ObjectStores.TASKS, updatedTask);
+            // Merge with existingTask to ensure all fields are present for update
+            const finalUpdate = { ...existingTask, ...updatedTaskData };
+            await update(ObjectStores.TASKS, finalUpdate);
           }
         }
       }
@@ -337,7 +350,7 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
         // 标记为已删除
         const task = await get<DBTask>(ObjectStores.TASKS, taskId);
         if (task) {
-          task.isDeleted = true;
+          task.isDeleted = 1; // Correct
           task.deletedAt = new Date();
           await update(ObjectStores.TASKS, task);
         }

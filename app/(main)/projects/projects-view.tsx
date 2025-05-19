@@ -304,10 +304,6 @@ export function ProjectsView() {
         isFrog: 0,
         isDeleted: 0,
         isRecurring: 0,
-        estimatedPomodoros: 0,
-        actualPomodoros: 0,
-        subtasks: [],
-        tags: [],
     };
     try {
         await add(ObjectStores.TASKS, taskToAdd);

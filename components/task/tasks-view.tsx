@@ -1,6 +1,9 @@
+// 此文件定义了任务管理视图组件 (TasksView)，
+// 负责展示用户任务列表、提供多种筛选和排序功能、处理任务的创建、编辑、删除、完成等操作，
+// 并集成了任务筛选侧边栏 (TaskFilterSidebar) 和批量操作栏 (BatchOperationsBar)。
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   AlertCircle,
   ArrowDown,
@@ -22,6 +25,9 @@ import {
   Trash2,
   ArrowUpLeft,
   CalendarDays,
+  Check, // Added for batch actions and menu
+  Undo, // Added for menu
+  XCircle, // Added for cancel selection
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -63,14 +69,49 @@ import { formatTimeForDisplay, checkTimeOverlap } from "@/lib/utils"
 import {
   NO_PROJECT_VALUE,
   Task,
-  priorityMapToDB, 
   priorityMapFromDB,
   toDBTaskShape,
-  fromDBTaskShape
+  fromDBTaskShape,
+  TaskPriority, // TaskPriority is used here
 } from "@/lib/task-utils"
-// import { TaskStatus, TaskPriority, TaskContext } from "@/types/task" // LINTER ERROR: Cannot find module '@/types/task' or its corresponding type declarations. Please verify the file exists and the path alias in tsconfig.json is correct.
-// import { PomodoroTimer } from "./pomodoro-timer" // PomodoroTimer 来源不明确，暂时注释
-import { TaskFormDialog } from "./task-form-dialog"
+import { TaskFormFields, TaskFormData, UIPriority } from "./TaskFormFields"
+import { toast } from "sonner"
+import { BatchOperationsBar } from "./batch-operations-bar"
+import { TaskFilterSidebar, DateFilterType } from "./task-filter-sidebar" // DateFilterType is used here
+import { DateRange } from "react-day-picker"
+
+// Debounce Hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// Define task category constants
+const TASK_CATEGORY_NEXT_ACTION = 'next_action';
+const TASK_CATEGORY_SOMEDAY_MAYBE = 'someday_maybe';
+const TASK_CATEGORY_WAITING_FOR = 'waiting_for';
+
+// Helper to map UIPriority (from form) to DBTaskType['priority']
+const mapUiPriorityToStoragePriority = (uiPriority: UIPriority): NonNullable<DBTaskType['priority']> => {
+    switch (uiPriority) {
+        case "importantUrgent": return "importantUrgent";
+        case "importantNotUrgent": return "importantNotUrgent";
+        case "notImportantUrgent": return "notImportantUrgent";
+        case "notImportantNotUrgent": return "notImportantNotUrgent";
+        default: return "notImportantNotUrgent"; // Fallback
+    }
+};
 
 export function TasksView() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -83,36 +124,54 @@ export function TasksView() {
   const [isConfirmDeleteDialogOpen, setIsConfirmDeleteDialogOpen] = useState(false);
   const [taskToDeleteId, setTaskToDeleteId] = useState<number | null>(null);
 
+  const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
+
+
   const [selectedView, setSelectedView] = useState("next-actions")
-  const [selectedProject, setSelectedProject] = useState<string | null>(null)
-  const [selectedTag, setSelectedTag] = useState<string | null>(null)
-  const [selectedDate, setSelectedDate] = useState<"today" | "this-week" | "next-7-days" | "no-date" | null>(null)
+  // REMOVED old single-select filter states:
+  // const [selectedProject, setSelectedProject] = useState<string | null>(null)
+  // const [selectedTag, setSelectedTag] = useState<string | null>(null)
+  // const [selectedDate, setSelectedDate] = useState<"today" | "this-week" | "next-7-days" | "no-date" | null>(null)
+
+  // NEW: States for advanced filtering
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
+  const [activeDateFilter, setActiveDateFilter] = useState<"today" | "this-week" | "next-7-days" | "this-month" | "no-date" | "custom" | null>(null); 
+  const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined); 
+  const [selectedPriorities, setSelectedPriorities] = useState<TaskPriority[]>([]);
+  const [selectedDateFilterType, setSelectedDateFilterType] = useState<DateFilterType>('dueDate'); 
+
   const [sortBy, setSortBy] = useState("priority")
   const [viewMode, setViewMode] = useState("list")
-  const [searchQuery, setSearchQuery] = useState("")
+  const [searchTermInput, setSearchTermInput] = useState(""); // For direct input binding
+  const debouncedSearchTerm = useDebounce(searchTermInput, 300); // Debounced value
+  // searchQuery will now be effectively replaced by debouncedSearchTerm in filters
+  // but we need to ensure that dependent hooks use debouncedSearchTerm
+
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [newTask, setNewTask] = useState<Partial<Task>>({
-    title: "",
-    description: "",
-    priority: "important-not-urgent",
-    projectId: undefined,
-    completed: false,
-    isFrog: false,
-    tags: [],
-    dueDate: undefined,
-  })
-  const [date, setDate] = useState<Date>()
+  // Removed newTask state as TaskFormFields handles its own internal state via key or initialData
+  // const [newTask, setNewTask] = useState<Partial<Task>>({...})
+  // const [date, setDate] = useState<Date>() // This was not used for create dialog, TaskFormFields handles date
   const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false)
   const [selectedTask, setSelectedTaskState] = useState<{ id: string; title: string } | null>(null)
 
   // State for trash view
-  const [deletedTasks, setDeletedTasks] = useState<DBTaskType[]>([]) // Store raw DBTaskType for deletedAt
+  const [deletedTasks, setDeletedTasks] = useState<DBTaskType[]>([])
   const [loadingTrash, setLoadingTrash] = useState<boolean>(false);
   const [trashError, setTrashError] = useState<Error | null>(null);
   const [taskToPermanentlyDeleteId, setTaskToPermanentlyDeleteId] = useState<number | null>(null);
   const [isPermanentDeleteConfirmOpen, setIsPermanentDeleteConfirmOpen] = useState(false);
 
-  // Moved useCallback definitions before useEffect that uses them
+  const [createTaskFormKey, setCreateTaskFormKey] = useState(() => `create-task-form-${Date.now()}`);
+
+  const resetCreateTaskForm = useCallback(() => {
+    setCreateTaskFormKey(`create-task-form-${Date.now()}`);
+  }, []);
+
+  const dispatchStatsUpdate = () => {
+    window.dispatchEvent(new CustomEvent('taskDataChangedForStats'));
+  };
+
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -152,7 +211,6 @@ export function TasksView() {
     setTrashError(null);
     try {
       const dbDeletedTasks = await getByIndex<DBTaskType>(ObjectStores.TASKS, 'byIsDeleted', 1);
-      // Sort by deletedAt descending, then by updatedAt or createdAt as fallback
       dbDeletedTasks.sort((a, b) => {
         const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : (a.updatedAt ? new Date(a.updatedAt).getTime() : new Date(a.createdAt).getTime());
         const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : (b.updatedAt ? new Date(b.updatedAt).getTime() : new Date(a.createdAt).getTime());
@@ -169,7 +227,11 @@ export function TasksView() {
 
   const getProjectNameById = useCallback((projectId: number | string | undefined): string => {
     if (projectId === undefined) return "";
-    const project = projectList.find(p => p.id === projectId);
+    // Handle NO_PROJECT_VALUE explicitly if it's passed as a string
+    if (projectId === NO_PROJECT_VALUE) {
+      return "无项目";
+    }
+    const project = projectList.find(p => p.id === Number(projectId)); // Ensure projectId is number for lookup
     return project ? project.name : String(projectId); 
   }, [projectList]);
 
@@ -244,67 +306,260 @@ export function TasksView() {
   useEffect(() => {
     if (selectedView === 'trash') {
       loadDeletedTasks();
+      // Clear other filters when entering trash view as per requirement
+      // This is slightly different from clearAllAdvancedFilters as it's specific to entering trash
+      setSelectedProjectIds([]);
+      setSelectedTagNames([]);
+      setActiveDateFilter(null);
+      setCustomDateRange(undefined);
+      setSelectedPriorities([]);
+      setSelectedDateFilterType('dueDate');
+      setSearchTermInput(""); // Usually, search is also cleared for trash view
     } else {
-      // When not in trash view, ensure main tasks and projects/tags are loaded.
-      // This might be redundant if they are already loaded, but ensures consistency if view changes rapidly.
+      // Ensure main tasks are loaded when switching away from trash or on initial load
       loadTasks();
-      loadProjects();
-      loadTags();
     }
-  }, [selectedView, loadTasks, loadProjects, loadTags, loadDeletedTasks]);
+    // Ensure projects and tags are available for the filter sidebar, load if not already loaded.
+    // This might be called multiple times but guards prevent redundant fetches.
+    if (projectList.length === 0 && selectedView !== 'trash') loadProjects();
+    if (tagList.length === 0 && selectedView !== 'trash') loadTags();
 
-  // Derived state for project and tag names for UI (e.g., sidebar filters)
-  const projectNamesForFilter = Array.from(new Set(projectList.map(p => p.name)));
-  const tagNamesForFilter = Array.from(new Set(tagList.map(t => t.name)));
+  }, [selectedView, loadDeletedTasks, loadTasks, loadProjects, loadTags]); // projectList.length and tagList.length removed as deps to avoid loop if load functions don't set them sync.
 
-  const handlePomodoroClick = (taskId: number, taskTitle: string) => {
-    setSelectedTaskState({ id: String(taskId), title: taskTitle });
-    setPomodoroModalOpen(true);
-  };
+  // Filter tasks - SIGNIFICANTLY REVISED
+  const filteredTasks = useMemo(() => { 
+    return tasks.filter((task) => {
+      // 1. View-specific filters (selectedView)
+      // This logic needs to be outside the main filter chain if selectedView is 'trash',
+      // as 'trash' view uses a different data source (deletedTasks).
+      // However, if we are not in 'trash' view, these filters apply:
+    if (selectedView === "completed") {
+      if (!task.completed) return false;
+    } else if (selectedView === "next-actions") {
+      if (task.completed || task.category !== TASK_CATEGORY_NEXT_ACTION) return false;
+    } else if (selectedView === "someday-maybe") {
+      if (task.completed || task.category !== TASK_CATEGORY_SOMEDAY_MAYBE) return false;
+    } else if (selectedView === "waiting") {
+      if (task.completed || task.category !== TASK_CATEGORY_WAITING_FOR) return false;
+      }
+      // "all" view passes this stage.
 
-  // Filter tasks
-  const filteredTasks = tasks.filter((task) => {
-    // Filter by view
-    if (selectedView === "next-actions" && task.completed) return false
-    if (selectedView === "completed" && !task.completed) return false
-    if (selectedView === "someday-maybe" && task.priority !== "not-important-not-urgent") return false
-    if (selectedView === "waiting" && task.priority !== "not-important-urgent") return false
+      // 2. Project filter (selectedProjectIds) - AND logic with OR inside for multiple selections
+      if (selectedProjectIds.length > 0) {
+        if (!task.projectId || !selectedProjectIds.includes(String(task.projectId))) {
+          return false;
+        }
+      }
 
-    // Filter by project - Ensure consistent type for comparison (string)
-    if (selectedProject && String(task.projectId) !== selectedProject) return false
+      // 3. Tag filter (selectedTagNames) - AND logic with OR inside for multiple selections
+      if (selectedTagNames.length > 0) {
+        if (!task.tags || task.tags.length === 0 || !task.tags.some(tag => selectedTagNames.includes(tag))) {
+          return false;
+        }
+      }
 
-    // Filter by tag
-    if (selectedTag && (!task.tags || !task.tags.includes(selectedTag))) return false
+      // 4. Date filter (activeDateFilter and customDateRange)
+      if (activeDateFilter) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Start of today for accurate comparisons
 
-    // Filter by date
-    if (selectedDate === "today" && (!task.dueDate || task.dueDate.toDateString() !== new Date().toDateString()))
-      return false
+        let taskDateToCompare: Date | undefined | null = null;
+        switch (selectedDateFilterType) {
+          case 'dueDate':
+            taskDateToCompare = task.dueDate;
+            break;
+          case 'plannedDate':
+            taskDateToCompare = task.plannedDate;
+            break;
+          case 'createdAtDate':
+            taskDateToCompare = task.createdAt; // Assuming createdAt is always a Date
+            break;
+          default:
+            taskDateToCompare = task.dueDate; // Fallback or handle error
+        }
+
+        if (activeDateFilter === "today") {
+          if (!taskDateToCompare || taskDateToCompare.toDateString() !== today.toDateString()) return false;
+        } else if (activeDateFilter === "this-week") {
+          const currentDay = today.getDay(); // Sunday - 0, Monday - 1, ..., Saturday - 6
+          const startOfWeek = new Date(today);
+          startOfWeek.setDate(today.getDate() - currentDay + (currentDay === 0 ? -6 : 1));
+          const endOfWeek = new Date(startOfWeek);
+          endOfWeek.setDate(startOfWeek.getDate() + 6);
+          endOfWeek.setHours(23,59,59,999);
+          if (!taskDateToCompare || taskDateToCompare < startOfWeek || taskDateToCompare > endOfWeek) return false;
+        } else if (activeDateFilter === "next-7-days") {
+          const endOf7Days = new Date(today);
+          endOf7Days.setDate(today.getDate() + 6); 
+          endOf7Days.setHours(23,59,59,999);
+          if (!taskDateToCompare || taskDateToCompare < today || taskDateToCompare > endOf7Days) return false;
+        } else if (activeDateFilter === "this-month") {
+          const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+          const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+          endOfMonth.setHours(23,59,59,999);
+          if (!taskDateToCompare || taskDateToCompare < startOfMonth || taskDateToCompare > endOfMonth) return false;
+        } else if (activeDateFilter === "no-date") {
+          if (taskDateToCompare) return false;
+        } else if (activeDateFilter === "custom" && customDateRange) {
+          if (!taskDateToCompare) return false; 
+          
+          let passStartDate = true;
+          if (customDateRange.from) { // Use .from
+            const customStart = new Date(customDateRange.from);
+            customStart.setHours(0,0,0,0); 
+            if (taskDateToCompare < customStart) {
+              passStartDate = false;
+            }
+          }
+          if (!passStartDate) return false;
+
+          let passEndDate = true;
+          if (customDateRange.to) { // Use .to
+            const customEnd = new Date(customDateRange.to);
+            customEnd.setHours(23, 59, 59, 999); 
+            if (taskDateToCompare > customEnd) {
+              passEndDate = false;
+            }
+          }
+          if (!passEndDate) return false;
+        }
+      }
+
+      // 5. Priority filter (selectedPriorities) - AND logic with OR inside for multiple selections
+      if (selectedPriorities.length > 0) {
+        if (!task.priority || !selectedPriorities.includes(task.priority as TaskPriority)) {
+          return false;
+        }
+      }
+
+      // 6. Search query filter (searchQuery)
     if (
-      selectedDate === "this-week" &&
-      (!task.dueDate ||
-        task.dueDate < new Date() ||
-        task.dueDate > new Date(new Date().setDate(new Date().getDate() + 7)))
+      debouncedSearchTerm && // Use debouncedSearchTerm
+      !task.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) &&
+      (!task.description || !task.description.toLowerCase().includes(debouncedSearchTerm.toLowerCase()))
     )
-      return false
-    if (
-      selectedDate === "next-7-days" &&
-      (!task.dueDate ||
-        task.dueDate < new Date() ||
-        task.dueDate > new Date(new Date().setDate(new Date().getDate() + 7)))
-    )
-      return false
-    if (selectedDate === "no-date" && task.dueDate) return false
+        return false;
 
-    // Filter by search query
-    if (
-      searchQuery &&
-      !task.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
-      (!task.description || !task.description.toLowerCase().includes(searchQuery.toLowerCase()))
-    )
-      return false
+      return true;
+    });
+  }, [tasks, selectedView, selectedProjectIds, selectedTagNames, activeDateFilter, customDateRange, selectedPriorities, debouncedSearchTerm, selectedDateFilterType]);
 
-    return true
-  })
+  // New: Memoized calculation for tasks to be used for tag counting
+  // This filters tasks based on all active filters EXCEPT tag filters themselves.
+  const tasksForTagCount = useMemo(() => {
+    return tasks.filter((task) => {
+      // 1. View-specific filters (selectedView)
+      if (selectedView === "completed") {
+        if (!task.completed) return false;
+      } else if (selectedView === "next-actions") {
+        if (task.completed || task.category !== TASK_CATEGORY_NEXT_ACTION) return false;
+      } else if (selectedView === "someday-maybe") {
+        if (task.completed || task.category !== TASK_CATEGORY_SOMEDAY_MAYBE) return false;
+      } else if (selectedView === "waiting") {
+        if (task.completed || task.category !== TASK_CATEGORY_WAITING_FOR) return false;
+      }
+      // "all" view passes this stage.
+
+      // 2. Project filter (selectedProjectIds)
+      if (selectedProjectIds.length > 0) {
+        if (!task.projectId || !selectedProjectIds.includes(String(task.projectId))) {
+          return false;
+        }
+      }
+
+      // 3. Tag filter - SKIPPED FOR THIS CALCULATION
+
+      // 4. Date filter (activeDateFilter and customDateRange)
+      if (activeDateFilter) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); 
+        let taskDateToCompare: Date | undefined | null = null;
+        switch (selectedDateFilterType) {
+          case 'dueDate': taskDateToCompare = task.dueDate; break;
+          case 'plannedDate': taskDateToCompare = task.plannedDate; break;
+          case 'createdAtDate': taskDateToCompare = task.createdAt; break;
+          default: taskDateToCompare = task.dueDate; 
+        }
+
+        if (activeDateFilter === "today") {
+          if (!taskDateToCompare || taskDateToCompare.toDateString() !== today.toDateString()) return false;
+        } else if (activeDateFilter === "this-week") {
+          const currentDay = today.getDay(); 
+          const startOfWeek = new Date(today);
+          startOfWeek.setDate(today.getDate() - currentDay + (currentDay === 0 ? -6 : 1));
+          const endOfWeek = new Date(startOfWeek);
+          endOfWeek.setDate(startOfWeek.getDate() + 6);
+          endOfWeek.setHours(23,59,59,999);
+          if (!taskDateToCompare || taskDateToCompare < startOfWeek || taskDateToCompare > endOfWeek) return false;
+        } else if (activeDateFilter === "next-7-days") {
+          const endOf7Days = new Date(today);
+          endOf7Days.setDate(today.getDate() + 6); 
+          endOf7Days.setHours(23,59,59,999);
+          if (!taskDateToCompare || taskDateToCompare < today || taskDateToCompare > endOf7Days) return false;
+        } else if (activeDateFilter === "this-month") {
+          const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+          const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+          endOfMonth.setHours(23,59,59,999);
+          if (!taskDateToCompare || taskDateToCompare < startOfMonth || taskDateToCompare > endOfMonth) return false;
+        } else if (activeDateFilter === "no-date") {
+          if (taskDateToCompare) return false;
+        } else if (activeDateFilter === "custom" && customDateRange) {
+          if (!taskDateToCompare) return false; 
+          let passStartDate = true;
+          if (customDateRange.from) { 
+            const customStart = new Date(customDateRange.from);
+            customStart.setHours(0,0,0,0); 
+            if (taskDateToCompare < customStart) passStartDate = false;
+          }
+          if (!passStartDate) return false;
+          let passEndDate = true;
+          if (customDateRange.to) { 
+            const customEnd = new Date(customDateRange.to);
+            customEnd.setHours(23, 59, 59, 999); 
+            if (taskDateToCompare > customEnd) passEndDate = false;
+          }
+          if (!passEndDate) return false;
+        }
+      }
+
+      // 5. Priority filter (selectedPriorities)
+      if (selectedPriorities.length > 0) {
+        if (!task.priority || !selectedPriorities.includes(task.priority as TaskPriority)) {
+          return false;
+        }
+      }
+
+      // 6. Search query filter (searchQuery)
+      if (debouncedSearchTerm && // Use debouncedSearchTerm
+          !task.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) &&
+          (!task.description || !task.description.toLowerCase().includes(debouncedSearchTerm.toLowerCase())))
+      {
+        return false;
+      }
+      return true;
+    });
+  }, [tasks, selectedView, selectedProjectIds, activeDateFilter, customDateRange, selectedPriorities, debouncedSearchTerm, selectedDateFilterType]);
+
+  // New: Memoized calculation for tag counts based on tasksForTagCount
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tagList.forEach(tag => {
+      counts[tag.name] = 0; // Initialize all tags from global list with 0
+    });
+    tasksForTagCount.forEach(task => {
+      if (task.tags && task.tags.length > 0) {
+        task.tags.forEach(tagName => {
+          if (counts[tagName] !== undefined) {
+            counts[tagName]++;
+          }
+          // If a task has a tag not in the global tagList (e.g., due to data inconsistency),
+          // it won't be counted here towards a pre-defined tag slot.
+          // Optionally, could add it to counts if desired: else { counts[tagName] = 1; }
+        });
+      }
+    });
+    return counts;
+  }, [tasksForTagCount, tagList]);
 
   // Sort tasks
   const sortedTasks = [...filteredTasks].sort((a, b) => {
@@ -402,66 +657,60 @@ export function TasksView() {
     }
   };
 
-  const handleCreateTask = async () => {
-    if (newTask.title?.trim()) {
-      setLoading(true); 
-      const processedTags = newTask.tags?.map(t => t.trim()).filter(t => t) || [];
+  const handleCreateTask = async (formData: TaskFormData) => {
+    setLoading(true);
+    const now = new Date();
+    try {
+      // Ensure tags exist or are created
+      if (formData.tags && formData.tags.length > 0) {
+        await ensureTagsExist(formData.tags);
+      }
 
       const dbTaskPayload: Omit<DBTaskType, 'id'> = {
-        title: newTask.title!,
-        description: newTask.description || undefined,
-        priority: newTask.priority ? priorityMapToDB[newTask.priority] : 'notImportantNotUrgent',
-        dueDate: newTask.dueDate ? new Date(newTask.dueDate) : undefined,
-        completed: 0, 
+        title: formData.title,
+        description: formData.description,
+        priority: mapUiPriorityToStoragePriority(formData.priority),
+        dueDate: formData.dueDate,
+        completed: 0,
+        createdAt: now,
+        updatedAt: now,
+        projectId: typeof formData.projectId === 'string' && formData.projectId === NO_PROJECT_VALUE
+          ? undefined
+          : (typeof formData.projectId === 'string' ? parseInt(formData.projectId) : formData.projectId),
+        tags: formData.tags || [],
+        isFrog: formData.isFrog ? 1 : 0,
+        estimatedDurationHours: formData.estimatedDurationHours || 0,
+        isDeleted: 0,
+        subtasks: [], // TaskFormFields doesn't handle subtasks yet, defaulting to empty
+        category: formData.category,
+        plannedDate: formData.plannedDate,
+        isRecurring: formData.isRecurring ? 1 : 0,
+        recurrenceRule: formData.recurrenceRule,
+        recurrenceEndDate: formData.recurrenceEndDate,
+        recurrenceCount: formData.recurrenceCount,
+        // Fields not in TaskFormData but in DBTaskType, set to default/undefined
         completedAt: undefined,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        projectId: newTask.projectId || undefined,
-        isFrog: (newTask.isFrog ?? false) ? 1 : 0, 
-        subtasks: newTask.subtasks?.map(st => ({ title: st.title, completed: (st.completed ? 1 : 0) as (0|1) })) || [], 
-        tags: processedTags, 
-        isRecurring: 0, 
-        isDeleted: 0, 
         deletedAt: undefined,
         goalId: undefined,
-        estimatedPomodoros: newTask.estimatedPomodoros, // Ensure this is passed if present in newTask
-        actualPomodoros: undefined,
+        actualPomodoros: undefined, // TaskFormFields doesn't directly set this; could be estimatedPomodoros if design changes
         reminderDate: undefined,
-        recurrenceRule: undefined,
-        plannedDate: undefined,
         order: undefined,
+        // estimatedPomodoros is on TaskFormData (as estimatedDurationHours), not directly on DBTaskType like this
+        // actualPomodoros should be tracked separately post-creation.
       };
 
-      try {
-        // First, ensure tags exist or are created
-        if (processedTags.length > 0) {
-          await ensureTagsExist(processedTags);
-        }
-        
-        const newId = await add(ObjectStores.TASKS, dbTaskPayload as DBTaskType);
-        
-        // Reload all tasks to reflect the new one.
-        // loadProjects() and loadTags() should also be up-to-date if ensureTagsExist was called.
-        await loadTasks(); 
-        
-      setNewTask({
-        title: "",
-        description: "",
-        priority: "important-not-urgent",
-          projectId: undefined,
-        completed: false,
-          isFrog: false,
-          tags: [],
-          dueDate: undefined,
-          estimatedPomodoros: undefined, // Reset this field too
-        });
-        setIsCreateDialogOpen(false);
-      } catch (err) {
-        console.error("Failed to create task:", err);
-        setError(err instanceof Error ? err : new Error('Failed to create task'));
-      } finally {
-        setLoading(false);
-      }
+      await add(ObjectStores.TASKS, dbTaskPayload as DBTaskType);
+      toast.success("任务已成功创建！");
+      await loadTasks();
+      
+      resetCreateTaskForm(); // Reset form by changing key
+      setIsCreateDialogOpen(false);
+    } catch (err) {
+      console.error("Failed to create task:", err);
+      toast.error("任务创建失败。");
+      setError(err instanceof Error ? err : new Error('Failed to create task'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -475,28 +724,56 @@ export function TasksView() {
     setLoading(true);
     try {
       const originalTaskInDB = await get<DBTaskType>(ObjectStores.TASKS, taskToEdit.id);
-      const processedTags = updatedTaskData.tags?.map(t => t.trim()).filter(t => t) || [];
+      // const processedTags = updatedTaskData.tags?.map(t => t.trim()).filter(t => t) || []; // ensureTagsExist now handles raw tags
       
       // Ensure tags exist or are created before updating the task with them
-      if (processedTags.length > 0) {
-        await ensureTagsExist(processedTags);
+      if (updatedTaskData.tags && updatedTaskData.tags.length > 0) {
+        await ensureTagsExist(updatedTaskData.tags);
       }
 
       const payloadForDB: DBTaskType = {
-        ...originalTaskInDB,
-        ...(toDBTaskShape(updatedTaskData)), // Apply general shape transformation
-        title: updatedTaskData.title, // Ensure specific fields from form are preserved if toDBTaskShape doesn't cover all
-        description: updatedTaskData.description, 
-        priority: updatedTaskData.priority ? priorityMapToDB[updatedTaskData.priority] : originalTaskInDB.priority, 
+        ...originalTaskInDB, // Start with existing DB data
+        ...(toDBTaskShape(updatedTaskData)), // Apply general shape transformation from Task (utils type) to DB shape
+        // Explicitly override fields from updatedTaskData (which is Task utils type) after toDBTaskShape
+        // because toDBTaskShape might not map everything or map differently than direct fields
+        title: updatedTaskData.title,
+        description: updatedTaskData.description,
+        // priority in updatedTaskData is TaskPriority (kebab-case), needs to map to UIPriority for mapUiPriorityToStoragePriority if used
+        // However, EditTaskDialog already maps TaskUtilsType.priority (kebab-case) to UIPriority for TaskFormFields,
+        // and then handleUpdateTask in EditTaskDialog maps UIPriority back to TaskUtilsPriority (kebab-case).
+        // So, `updatedTaskData.priority` here is `TaskPriority` (kebab-case).
+        // We need to use a map that takes TaskPriority (kebab-case) to storage priority (camelCase for DB)
+        // Or, ensure `toDBTaskShape` handles this correctly.
+        // For now, let's assume `toDBTaskShape` handles `priority` mapping from `Task` type.
+        // If `toDBTaskShape` outputs `priority` in `UIPriority` format, then `mapUiPriorityToStoragePriority` would be needed.
+        // Let's assume `toDBTaskShape` correctly converts `priority` to the DB's expected format.
+        // The current `toDBTaskShape` maps `Task['priority']` (TaskPriority) to `DBTaskType['priority']` (string, but should be the camelCase)
+        
+        // Re-evaluating: handleUpdateTask in THIS file receives `updatedTaskData: Task` (from task-utils).
+        // `toDBTaskShape` is designed to convert `Task` (task-utils) to `Partial<DBTaskType>`.
+        // `priorityMapToDB` in task-utils converts `TaskPriority` (kebab-case) to the DB string (camelCase).
+        // So `toDBTaskShape` should use `priorityMapToDB`.
+        // Let's verify `toDBTaskShape`'s priority handling.
+        // Ok, `toDBTaskShape` calls `priorityMapToDB`. So `payloadForDB.priority` will be correct.
+
         dueDate: updatedTaskData.dueDate ? new Date(updatedTaskData.dueDate) : undefined,
-        projectId: updatedTaskData.projectId, 
+        projectId: updatedTaskData.projectId,
         isFrog: updatedTaskData.isFrog ? 1 : 0,
-        tags: processedTags, // Use the processed tags
+        tags: updatedTaskData.tags || [], // Use tags from updatedTaskData (already processed if ensureTagsExist was called with them)
         updatedAt: new Date(),
-        estimatedPomodoros: updatedTaskData.estimatedPomodoros, // Ensure this is updated
+        // estimatedPomodoros: updatedTaskData.estimatedPomodoros, // This is not on Task type from task-utils directly.
+                                                                // It comes from TaskFormData and is mapped to estimatedDurationHours.
+                                                                // toDBTaskShape should handle estimatedDurationHours from Task type.
+        category: updatedTaskData.category, // from Task type
+        plannedDate: updatedTaskData.plannedDate, // from Task type
+        isRecurring: updatedTaskData.isRecurring ? 1 : 0, // from Task type
+        recurrenceRule: updatedTaskData.recurrenceRule, // from Task type
+        recurrenceEndDate: updatedTaskData.recurrenceEndDate, // from Task type
+        recurrenceCount: updatedTaskData.recurrenceCount, // from Task type
+
       };
       
-      // Remove undefined keys that might have been introduced by spreading updatedTaskData if it was partial
+      // Remove undefined keys to prevent overwriting existing DB fields with undefined
       Object.keys(payloadForDB).forEach(key => (payloadForDB as any)[key] === undefined && delete (payloadForDB as any)[key]);
 
       await update(ObjectStores.TASKS, payloadForDB);
@@ -632,11 +909,15 @@ export function TasksView() {
       const title = taskItem.title;
       const type = 'task';
 
-      let durationMinutes = 60; // 默认时长
-      // 假设 Task 类型有 estimatedPomodoros 字段
-      if (taskItem.estimatedPomodoros && taskItem.estimatedPomodoros > 0) {
-        durationMinutes = taskItem.estimatedPomodoros * 25; 
+      let durationMinutes = 60; // 默认时长 (60分钟)
+
+      // Use estimatedDurationHours from taskItem (Task type from task-utils)
+      // taskItem.estimatedDurationHours is in hours (e.g., 0.5, 1, 1.5)
+      if (taskItem.estimatedDurationHours && taskItem.estimatedDurationHours > 0) {
+        durationMinutes = taskItem.estimatedDurationHours * 60; // Convert hours to minutes
       }
+      // No fallback to estimatedPomodoros as it's not on the Task type.
+
       const durationMilliseconds = durationMinutes * 60 * 1000;
 
       const existingDbBlocks = await getAll<DBTimeBlockType>(ObjectStores.TIME_BLOCKS);
@@ -733,6 +1014,210 @@ export function TasksView() {
     }
   };
 
+  // 以下是处理选择任务的专用函数
+  const handleTaskSelection = (taskId: number, isSelected: boolean) => {
+    setSelectedTaskIds(prevSelectedIds =>
+      isSelected
+        ? [...prevSelectedIds, taskId]
+        : prevSelectedIds.filter(id => id !== taskId)
+    );
+  };
+
+  // 批量操作功能已移至 BatchOperationsBar 组件
+
+  // Header Checkbox Logic
+  const areAllVisibleTasksSelected = useMemo(() => 
+    sortedTasks.length > 0 && selectedTaskIds.length === sortedTasks.length,
+    [sortedTasks, selectedTaskIds]
+  );
+  
+  const areSomeTasksSelected = useMemo(() =>
+    selectedTaskIds.length > 0 && selectedTaskIds.length < sortedTasks.length,
+    [sortedTasks, selectedTaskIds]
+  );
+
+  const headerCheckboxState = useMemo(() => {
+    if (sortedTasks.length === 0) return false; // No tasks, so nothing to select
+    return areAllVisibleTasksSelected ? true : (areSomeTasksSelected ? 'indeterminate' : false);
+  }, [areAllVisibleTasksSelected, areSomeTasksSelected, sortedTasks.length]);
+
+  const handleToggleSelectAll = () => {
+    if (areAllVisibleTasksSelected) {
+      setSelectedTaskIds([]);
+    } else {
+      // Selects all tasks currently visible in sortedTasks
+      setSelectedTaskIds(sortedTasks.map(t => t.id));
+    }
+  };
+
+  // NEW: Function to clear all advanced filters (excluding view and search query)
+  const clearAllAdvancedFilters = useCallback(() => {
+    setSelectedProjectIds([]);
+    setSelectedTagNames([]);
+    setActiveDateFilter(null);
+    setCustomDateRange(undefined); // Ensure customDateRange is also reset
+    setSelectedPriorities([]);
+    setSelectedDateFilterType('dueDate'); // Reset date filter type to default
+    // Optionally, reset selectedView to a default, e.g., "next-actions", if desired,
+    // or leave it as is, allowing users to clear filters for the current view.
+    // setSelectedView("next-actions"); 
+    // setSearchQuery(""); // Also optionally reset search
+  }, []);
+
+  // Restore handlePomodoroClick
+  const handlePomodoroClick = (taskId: number, taskTitle: string) => {
+    setSelectedTaskState({ id: String(taskId), title: taskTitle });
+    setPomodoroModalOpen(true);
+  };
+
+  // Helper function to get translated view name (can be expanded)
+  const getTranslatedViewName = (view: string): string => {
+    switch (view) {
+      case "next-actions":
+        return "下一步行动";
+      case "someday-maybe":
+        return "将来/也许";
+      case "waiting-for":
+        return "等待中";
+      case "calendar":
+        return "日历视图";
+      case "project":
+        return "按项目查看"; // This case might be obsolete if projects are handled by advanced filters
+      case "tag":
+        return "按标签查看"; // This case might be obsolete if tags are handled by advanced filters
+      case "trash":
+        return "回收站";
+      default:
+        return view;
+    }
+  };
+
+  const getTranslatedDateFilterName = (filter: string | null): string => {
+    if (!filter) return "";
+    switch (filter) {
+      case "today": return "今天";
+      case "this-week": return "本周";
+      case "next-7-days": return "未来7天";
+      case "this-month": return "本月";
+      case "no-date": return "无日期";
+      default: return "";
+    }
+  }
+
+  const getTranslatedDateFilterType = (type: DateFilterType): string => {
+    switch (type) {
+      case 'dueDate': return '截止日期';
+      case 'plannedDate': return '计划日期';
+      case 'createdAtDate': return '创建日期';
+      default: return '';
+    }
+  }
+
+  const getTranslatedPriorityName = (priority: TaskPriority): string => {
+    switch (priority) {
+      case 'important-urgent': return '重要且紧急';
+      case 'important-not-urgent': return '重要不紧急';
+      case 'not-important-urgent': return '紧急不重要';
+      case 'not-important-not-urgent': return '不重要不紧急';
+      default: return '';
+    }
+  }
+
+  const dynamicListTitle = useMemo(() => {
+    if (selectedView === 'trash') {
+      return `回收站 (${filteredTasks.length})`;
+    }
+
+    const activeFiltersDescription: string[] = [];
+    let titlePrefix = getTranslatedViewName(selectedView);
+
+    // Project filter
+    if (selectedProjectIds.length > 0) {
+      const projectNames = selectedProjectIds
+        .map(id => getProjectNameById(id))
+        .filter(name => name) // Filter out empty names if any id was invalid
+        .join(', ');
+      if (projectNames) activeFiltersDescription.push(`项目: ${projectNames}`);
+    }
+
+    // Tag filter
+    if (selectedTagNames.length > 0) {
+      activeFiltersDescription.push(`标签: ${selectedTagNames.join(', ')}`);
+    }
+
+    // Priority filter
+    if (selectedPriorities.length > 0) {
+      const priorityNames = selectedPriorities.map(getTranslatedPriorityName).join(', ');
+      activeFiltersDescription.push(`优先级: ${priorityNames}`);
+    }
+    
+    // Date filter
+    const dateFilterTypeStr = getTranslatedDateFilterType(selectedDateFilterType);
+    if (activeDateFilter) {
+      if (activeDateFilter === 'custom' && customDateRange) {
+        const start = customDateRange.from ? format(customDateRange.from, "P") : ''; // P for short date format
+        const end = customDateRange.to ? format(customDateRange.to, "P") : '';
+        if (start && end && start !== end) {
+          activeFiltersDescription.push(`${dateFilterTypeStr}: ${start} - ${end}`);
+        } else if (start) {
+          activeFiltersDescription.push(`${dateFilterTypeStr}: ${start}`);
+        }
+      } else if (activeDateFilter !== 'custom' && activeDateFilter !== 'no-date') { // no-date handled by view or absence of filter
+        activeFiltersDescription.push(`${dateFilterTypeStr}: ${getTranslatedDateFilterName(activeDateFilter)}`);
+      } else if (activeDateFilter === 'no-date') {
+        activeFiltersDescription.push(`${dateFilterTypeStr}: 无日期`);
+      }
+    }
+    
+    // Search query
+    if (debouncedSearchTerm) { // Use debouncedSearchTerm
+      activeFiltersDescription.push(`搜索: "${debouncedSearchTerm}"`);
+    }
+
+    // Constructing the title
+    if (activeFiltersDescription.length > 0) {
+      // If there are specific filters, change the prefix to a more general one
+      // unless the view itself is a primary filter like 'Next Actions'
+      const isDefaultView = ["next-actions", "someday-maybe", "waiting-for"].includes(selectedView);
+      if (!isDefaultView || activeFiltersDescription.length > 0) {
+         titlePrefix = "筛选结果";
+      }
+      if(isDefaultView && activeFiltersDescription.length > 0){
+        titlePrefix = `${getTranslatedViewName(selectedView)} (自定义筛选)`
+      }
+      return `${titlePrefix}: ${activeFiltersDescription.join('; ')} (${filteredTasks.length})`;
+    }
+    
+    // Default title if no advanced filters are active
+    return `${titlePrefix} (${filteredTasks.length})`;
+
+  }, [
+    selectedView,
+    filteredTasks.length, 
+    selectedProjectIds,
+    projectList, 
+    selectedTagNames,
+    activeDateFilter,
+    customDateRange,
+    selectedDateFilterType,
+    selectedPriorities,
+    debouncedSearchTerm, // Use debouncedSearchTerm
+    getProjectNameById, // Added as dependency
+    getTranslatedViewName, // Added as dependency
+    getTranslatedDateFilterName, // Added as dependency
+    getTranslatedDateFilterType, // Added as dependency
+    getTranslatedPriorityName // Added as dependency
+  ]);
+
+  useEffect(() => {
+    loadTasks();
+    // Ensure projects and tags are available for the filter sidebar, load if not already loaded.
+    // This might be called multiple times but guards prevent redundant fetches.
+    if (projectList.length === 0 && selectedView !== 'trash') loadProjects();
+    if (tagList.length === 0 && selectedView !== 'trash') loadTags();
+
+  }, [selectedView, loadDeletedTasks, loadTasks, loadProjects, loadTags]); // projectList.length and tagList.length removed as deps to avoid loop if load functions don't set them sync.
+
   if (loading && tasks.length === 0) { // Show full page loader only on initial load
     return (
       <div className="flex items-center justify-center h-screen">
@@ -757,166 +1242,37 @@ export function TasksView() {
       <div className="flex flex-col space-y-2 mb-6">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold tracking-tight">任务</h1>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <Dialog open={isCreateDialogOpen} onOpenChange={(isOpen) => {
+            setIsCreateDialogOpen(isOpen);
+            if (!isOpen) resetCreateTaskForm(); // Reset form if dialog is closed
+          }}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
                 创建任务
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px]">
+            <DialogContent className="sm:max-w-[650px] md:max-w-[700px] lg:max-w-[750px]">
               <DialogHeader>
                 <DialogTitle>创建新任务</DialogTitle>
                 <DialogDescription>添加一个新任务到您的任务列表中</DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="title">任务标题</Label>
-                  <Input
-                    id="title"
-                    placeholder="输入任务标题"
-                    value={newTask.title}
-                    onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="description">描述</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="输入任务描述（可选）"
-                    value={newTask.description}
-                    onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="priority">优先级</Label>
-                    <Select
-                      value={newTask.priority}
-                      onValueChange={(value) => setNewTask({ ...newTask, priority: value as Task["priority"] })}
-                    >
-                      <SelectTrigger id="priority">
-                        <SelectValue placeholder="选择优先级" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="important-urgent">
-                          <div className="flex items-center">
-                            <div className="h-3 w-3 rounded-sm bg-red-500 mr-2" />
-                            重要且紧急
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="important-not-urgent">
-                          <div className="flex items-center">
-                            <div className="h-3 w-3 rounded-sm bg-amber-500 mr-2" />
-                            重要不紧急
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="not-important-urgent">
-                          <div className="flex items-center">
-                            <div className="h-3 w-3 rounded-sm bg-blue-500 mr-2" />
-                            不重要但紧急
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="not-important-not-urgent">
-                          <div className="flex items-center">
-                            <div className="h-3 w-3 rounded-sm bg-green-500 mr-2" />
-                            不重要不紧急
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="dueDate">截止日期</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant={"outline"}
-                          className={cn("w-full justify-start text-left font-normal", !newTask.dueDate && "text-muted-foreground")}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {newTask.dueDate ? format(newTask.dueDate, "PPP") : <span>选择日期</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <CalendarComponent mode="single" selected={newTask.dueDate} onSelect={(newDate) => setNewTask({...newTask, dueDate: newDate})} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="project">项目</Label>
-                    <Select
-                      value={newTask.projectId?.toString() || NO_PROJECT_VALUE}
-                      onValueChange={async (value) => {
-                        if (value === 'new-project-create') {
-                          const newName = prompt("请输入新项目的名称:");
-                          if (newName) {
-                            const newProjectId = await handleCreateNewProject(newName);
-                            if (newProjectId !== undefined) {
-                              setNewTask({ ...newTask, projectId: newProjectId });
-                            }
-                          }
-                        } else if (value === NO_PROJECT_VALUE) {
-                          setNewTask({ ...newTask, projectId: undefined });
-                        } else {
-                          setNewTask({ ...newTask, projectId: value ? parseInt(value, 10) : undefined });
-                        }
-                      }}
-                    >
-                      <SelectTrigger id="project">
-                        <SelectValue placeholder="选择项目（可选）" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NO_PROJECT_VALUE}>无项目</SelectItem>
-                        {projectList.map((proj) => (
-                          <SelectItem key={proj.id} value={String(proj.id)}>
-                            {proj.name}
-                          </SelectItem>
-                        ))}
-                        <SelectItem value="new-project-create">+ 创建新项目</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="tags-input-create">标签 (逗号分隔)</Label>
-                    <Input 
-                      id="tags-input-create" 
-                      placeholder="例如: 工作,个人"
-                      value={newTask.tags?.join(", ") || ""}
-                      onChange={(e) => setNewTask({ ...newTask, tags: e.target.value.split(",").map(tag => tag.trim()).filter(tag => tag) })}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="estimatedPomodoros-create">预估番茄钟</Label>
-                  <Input
-                    id="estimatedPomodoros-create"
-                    type="number"
-                    placeholder="例如: 2"
-                    value={newTask.estimatedPomodoros || ""}
-                    onChange={(e) => setNewTask({ ...newTask, estimatedPomodoros: e.target.value ? parseInt(e.target.value, 10) : undefined })}
-                    min="0"
-                  />
-                </div>
-                <div className="flex items-center space-x-2 mt-2">
-                  <Checkbox 
-                    id="isFrog-create"
-                    checked={newTask.isFrog}
-                    onCheckedChange={(checked) => setNewTask({ ...newTask, isFrog: !!checked})} 
-                  />
-                  <Label htmlFor="isFrog-create" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    标记为青蛙任务
-                  </Label>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                  取消
-                </Button>
-                <Button onClick={handleCreateTask}>创建任务</Button>
-              </DialogFooter>
+              {/* Replace old form with TaskFormFields */}
+              <TaskFormFields
+                key={createTaskFormKey} // For resetting the form
+                availableProjects={projectList}
+                onSave={handleCreateTask}
+                onCancel={() => {
+                  setIsCreateDialogOpen(false);
+                  resetCreateTaskForm();
+                }}
+                onCreateNewProjectInForm={handleCreateNewProject}
+                submitButtonText="创建任务"
+                showCancelButton={true}
+                // initialData can be used here if needed for default values, but usually empty for create
+                // pomodoroDurationMinutes can be passed from a global setting if available
+              />
+              {/* DialogFooter is now part of TaskFormFields if showCancelButton is true */}
             </DialogContent>
           </Dialog>
         </div>
@@ -924,172 +1280,73 @@ export function TasksView() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {/* Left sidebar */}
-        <div className="md:col-span-1 space-y-6">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle>视图</CardTitle>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="space-y-1">
-                <Button
-                  variant={selectedView === "next-actions" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedView("next-actions")}
-                >
-                  <CheckSquare className="h-4 w-4 mr-2" />
-                  下一步行动
-                </Button>
-                <Button
-                  variant={selectedView === "all" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedView("all")}
-                >
-                  <CheckSquare className="h-4 w-4 mr-2" />
-                  所有任务
-                </Button>
-                <Button
-                  variant={selectedView === "completed" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedView("completed")}
-                >
-                  <CheckSquare className="h-4 w-4 mr-2" />
-                  已完成任务
-                </Button>
-                <Button
-                  variant={selectedView === "someday-maybe" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedView("someday-maybe")}
-                >
-                  <Clock className="h-4 w-4 mr-2" />
-                  将来/也许
-                </Button>
-                <Button
-                  variant={selectedView === "waiting" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedView("waiting")}
-                >
-                  <Clock className="h-4 w-4 mr-2" />
-                  等待中
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle>按项目查看</CardTitle>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="space-y-1">
-                {projectList.map((proj) => (
-                  <Button
-                    key={proj.id}
-                    variant={selectedProject === String(proj.id) ? "secondary" : "ghost"}
-                    className="w-full justify-start"
-                    onClick={() => setSelectedProject(selectedProject === String(proj.id) ? null : String(proj.id))}
-                  >
-                    <Flag className="h-4 w-4 mr-2" />
-                    {proj.name} 
-                  </Button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle>按标签查看</CardTitle>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="space-y-1">
-                {tagList.map((tag) => (
-                  <Button
-                    key={tag.name}
-                    variant={selectedTag === tag.name ? "secondary" : "ghost"}
-                    className="w-full justify-start"
-                    onClick={() => setSelectedTag(selectedTag === tag.name ? null : tag.name)}
-                  >
-                    <Tag className="h-4 w-4 mr-2" />
-                    {tag.name}
-                  </Button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle>按日期筛选</CardTitle>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="space-y-1">
-                <Button
-                  variant={selectedDate === "today" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedDate(selectedDate === "today" ? null : "today")}
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  今日到期
-                </Button>
-                <Button
-                  variant={selectedDate === "this-week" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedDate(selectedDate === "this-week" ? null : "this-week")}
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  本周到期
-                </Button>
-                <Button
-                  variant={selectedDate === "next-7-days" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedDate(selectedDate === "next-7-days" ? null : "next-7-days")}
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  未来7天
-                </Button>
-                <Button
-                  variant={selectedDate === "no-date" ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedDate(selectedDate === "no-date" ? null : "no-date")}
-                >
-                  <Calendar className="h-4 w-4 mr-2" />
-                  无截止日期
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card> {/* This is the bottom-most card for the actual trash link */}
-            <CardContent className="py-3">
-              <Button 
-                variant={selectedView === "trash" ? "secondary" : "ghost"} // Dynamically set variant
-                className="w-full justify-start"
-                onClick={() => setSelectedView("trash")} // Set onClick to change view
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                回收站
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Left sidebar - This will be replaced by the new TaskFilterSidebar component */}
+        {/* The old sidebar Card components for Views, Projects, Tags, Dates, Trash link are removed here */}
+        {/* Placeholder for the new sidebar component */}
+        <TaskFilterSidebar
+          allProjects={projectList}
+          allTags={tagList}
+          selectedView={selectedView}
+          onSelectedViewChange={setSelectedView}
+          selectedProjectIds={selectedProjectIds}
+          onSelectedProjectIdsChange={setSelectedProjectIds}
+          selectedTagNames={selectedTagNames}
+          onSelectedTagNamesChange={setSelectedTagNames}
+          activeDateFilter={activeDateFilter}
+          onActiveDateFilterChange={setActiveDateFilter}
+          customDateRange={customDateRange}
+          onCustomDateRangeChange={setCustomDateRange}
+          selectedPriorities={selectedPriorities}
+          onSelectedPrioritiesChange={setSelectedPriorities}
+          onClearAllAdvancedFilters={clearAllAdvancedFilters} 
+          getProjectNameById={getProjectNameById} // Pass the utility function
+          className="md:col-span-1"
+          selectedDateFilterType={selectedDateFilterType} // Pass new state
+          onSelectedDateFilterTypeChange={setSelectedDateFilterType} // Pass new state setter
+          tagCounts={tagCounts} // Pass the new tagCounts prop
+        />
 
         {/* Main content */}
         <div className="md:col-span-3 space-y-6">
+          <BatchOperationsBar 
+            selectedTaskIds={selectedTaskIds}
+            onClearSelection={() => setSelectedTaskIds([])}
+            onOperationComplete={() => {
+              loadTasks();
+              dispatchStatsUpdate();
+            }}
+            className="mb-4"
+          />
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
+                  { selectedView !== "trash" && sortedTasks.length > 0 && (
+                     <Checkbox
+                        id="selectAllHeader"
+                        checked={headerCheckboxState}
+                        onCheckedChange={handleToggleSelectAll}
+                        aria-label="选择/取消选择所有可见任务"
+                        className="mr-2"
+                      />
+                  )}
                   <CardTitle>
-                    {selectedView === "next-actions"
-                      ? "下一步行动"
-                      : selectedView === "completed"
-                        ? "已完成任务"
-                        : selectedView === "someday-maybe"
-                          ? "将来/也许"
-                          : selectedView === "waiting"
-                            ? "等待中"
-                            : "所有任务"}
+                    {selectedTagNames.length > 0 // Example of dynamic title part based on new filters
+                      ? `Tag: ${selectedTagNames.join(", ")}`
+                      : selectedProjectIds.length > 0 && projectList.length > 0
+                        ? `Project: ${selectedProjectIds.map(id => projectList.find(p=>String(p.id) === id)?.name || id ).join(", ")}`
+                        // More sophisticated title generation needed based on all active filters
+                      : selectedView === "next-actions"
+                        ? "下一步行动"
+                        : selectedView === "completed"
+                          ? "已完成任务"
+                          : selectedView === "someday-maybe"
+                            ? "将来/也许"
+                            : selectedView === "waiting"
+                              ? "等待中"
+                              : selectedView === "trash"
+                                  ? "回收站"
+                                : "所有任务"}
                   </CardTitle>
                   <Badge variant="outline">{selectedView === "trash" ? deletedTasks.length : sortedTasks.length}</Badge>
                 </div>
@@ -1100,8 +1357,8 @@ export function TasksView() {
                       type="search"
                       placeholder="搜索任务..."
                       className="w-[200px] pl-8 rounded-md"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      value={searchTermInput} // Bind to searchTermInput
+                      onChange={(e) => setSearchTermInput(e.target.value)} // Update searchTermInput directly
                     />
                   </div>
                   <DropdownMenu>
@@ -1142,6 +1399,8 @@ export function TasksView() {
               </div>
             </CardHeader>
             <CardContent>
+              {/* 批量操作栏已移至组件 BatchOperationsBar */}
+
               {selectedView === "trash" ? (
                 // Trash View UI - Replaced with TrashView component
                 <TrashView 
@@ -1160,16 +1419,20 @@ export function TasksView() {
                       <div
                         key={task.id}
                         className={cn(
-                          "flex items-start space-x-3 p-3 rounded-lg transition-colors",
-                          task.completed ? "bg-muted/50" : "hover:bg-muted/30",
+                          "flex items-start space-x-3 p-3 rounded-lg border transition-colors",
+                          selectedTaskIds.includes(task.id) 
+                            ? "bg-primary/10 border-primary/40 dark:bg-primary/20" 
+                            : (task.completed ? "bg-muted/50 border-transparent hover:bg-muted/70" : "bg-card hover:bg-muted/30 border-transparent"),
                         )}
                       >
+                        {/* 完全替换这个复选框 */}
                         <Checkbox
-                          checked={task.completed}
-                          onCheckedChange={() => toggleTaskCompletion(task.id)}
-                          className="mt-1"
+                          checked={selectedTaskIds.includes(task.id)}
+                          onCheckedChange={(checked) => handleTaskSelection(task.id, checked === true)}
+                          aria-label={`选择任务 ${task.title}`}
+                          className="mt-1 flex-shrink-0"
                         />
-                        <div className="flex-1 space-y-2">
+                        <div className="flex-1 space-y-1.5">
                           <div className="flex items-start justify-between">
                             <div className="space-y-1">
                               <div className="flex items-center">
@@ -1201,6 +1464,13 @@ export function TasksView() {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => toggleTaskCompletion(task.id)}>
+                                    {task.completed ? (
+                                      <><Undo className="h-4 w-4 mr-2" /> 标记为未完成</>
+                                    ) : (
+                                      <><Check className="h-4 w-4 mr-2" /> 标记为完成</>
+                                    )}
+                                  </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => openEditModal(task)}>
                                     <Edit className="h-4 w-4 mr-2" />
                                     编辑
@@ -1209,7 +1479,18 @@ export function TasksView() {
                                     <Flag className="h-4 w-4 mr-2" />
                                     {task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                  <DropdownMenuItem 
+                                    onClick={() => {
+                                      if(task.id === undefined) {
+                                        toast.error("任务ID无效，无法添加到时间轴。");
+                                        return;
+                                      }
+                                      // Assuming handleAddTaskToTimeline expects the Task (task-utils) type.
+                                      // The original task object `task` from `sortedTasks` is of type `Task` (task-utils).
+                                      handleAddTaskToTimeline(task);
+                                    }} 
+                                    disabled={task.completed}
+                                  >
                                     <CalendarDays className="h-4 w-4 mr-2" />
                                     添加到时间轴
                                   </DropdownMenuItem>
@@ -1290,13 +1571,13 @@ export function TasksView() {
                                 {task.subtasks.map((subtask) => (
                                   <div key={subtask.id} className="flex items-center space-x-2">
                                     <Checkbox
-                                      id={`subtask-${subtask.id}`}
+                                      id={`subtask-${task.id}-${subtask.id}`} // Ensure unique ID for subtask checkbox
                                       checked={subtask.completed}
-                                      onCheckedChange={() => toggleSubtaskCompletion(task.id, subtask.id)}
+                                      onCheckedChange={() => toggleSubtaskCompletion(task.id, subtask.id)} // task.id must be valid
                                       className="h-3 w-3"
                                     />
                                     <label
-                                      htmlFor={`subtask-${subtask.id}`}
+                                      htmlFor={`subtask-${task.id}-${subtask.id}`} // Match unique ID
                                       className={cn(
                                         "text-xs",
                                         subtask.completed && "line-through text-muted-foreground",
@@ -1319,7 +1600,7 @@ export function TasksView() {
                       </div>
                       <h3 className="text-lg font-medium mb-1">没有找到任务</h3>
                       <p className="text-muted-foreground mb-4 max-w-md">
-                        {searchQuery
+                        {debouncedSearchTerm // Use debouncedSearchTerm
                           ? "没有找到匹配的任务，请尝试不同的搜索条件"
                           : "您当前没有任务，点击创建任务按钮添加新任务"}
                       </p>
@@ -1347,13 +1628,16 @@ export function TasksView() {
                             key={task.id}
                             className={cn(
                               "border rounded-lg p-3 bg-white dark:bg-gray-800 transition-colors",
-                              task.completed ? "bg-muted/50" : "hover:bg-muted/30",
+                              selectedTaskIds.includes(task.id) 
+                                ? "ring-2 ring-primary ring-offset-1 dark:ring-offset-gray-800" 
+                                : (task.completed ? "bg-muted/50" : "hover:bg-muted/30"),
                             )}
                           >
                             <div className="flex items-start space-x-2">
                               <Checkbox
-                                checked={task.completed}
-                                onCheckedChange={() => toggleTaskCompletion(task.id)}
+                                checked={selectedTaskIds.includes(task.id)}
+                                onCheckedChange={(checked) => handleTaskSelection(task.id, checked === true)}
+                                aria-label={`选择任务 ${task.title}`}
                                 className="mt-0.5"
                               />
                               <div className="flex-1">
@@ -1383,9 +1667,28 @@ export function TasksView() {
                                     </Button>
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => toggleTaskCompletion(task.id)}>
+                                          {task.completed ? (
+                                            <><Undo className="h-4 w-4 mr-2" /> 标记为未完成</>
+                                          ) : (
+                                            <><Check className="h-4 w-4 mr-2" /> 标记为完成</>
+                                          )}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          编辑
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                        <DropdownMenuItem 
+                                          onClick={() => {
+                                            if(task.id === undefined) {
+                                              toast.error("任务ID无效，无法添加到时间轴。");
+                                              return;
+                                            }
+                                            handleAddTaskToTimeline(task);
+                                          }} 
+                                          disabled={task.completed}
+                                        >
                                           <CalendarDays className="h-4 w-4 mr-2" />
                                           添加到时间轴
                                         </DropdownMenuItem>
@@ -1432,13 +1735,16 @@ export function TasksView() {
                             key={task.id}
                             className={cn(
                               "border rounded-lg p-3 bg-white dark:bg-gray-800 transition-colors",
-                              task.completed ? "bg-muted/50" : "hover:bg-muted/30",
+                              selectedTaskIds.includes(task.id) 
+                                ? "ring-2 ring-primary ring-offset-1 dark:ring-offset-gray-800" 
+                                : (task.completed ? "bg-muted/50" : "hover:bg-muted/30"),
                             )}
                           >
                             <div className="flex items-start space-x-2">
                               <Checkbox
-                                checked={task.completed}
-                                onCheckedChange={() => toggleTaskCompletion(task.id)}
+                                checked={selectedTaskIds.includes(task.id)}
+                                onCheckedChange={(checked) => handleTaskSelection(task.id, checked === true)}
+                                aria-label={`选择任务 ${task.title}`}
                                 className="mt-0.5"
                               />
                               <div className="flex-1">
@@ -1468,9 +1774,28 @@ export function TasksView() {
                                     </Button>
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => toggleTaskCompletion(task.id)}>
+                                          {task.completed ? (
+                                            <><Undo className="h-4 w-4 mr-2" /> 标记为未完成</>
+                                          ) : (
+                                            <><Check className="h-4 w-4 mr-2" /> 标记为完成</>
+                                          )}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          编辑
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                        <DropdownMenuItem 
+                                          onClick={() => {
+                                            if(task.id === undefined) {
+                                              toast.error("任务ID无效，无法添加到时间轴。");
+                                              return;
+                                            }
+                                            handleAddTaskToTimeline(task);
+                                          }} 
+                                          disabled={task.completed}
+                                        >
                                           <CalendarDays className="h-4 w-4 mr-2" />
                                           添加到时间轴
                                         </DropdownMenuItem>
@@ -1517,13 +1842,16 @@ export function TasksView() {
                             key={task.id}
                             className={cn(
                               "border rounded-lg p-3 bg-white dark:bg-gray-800 transition-colors",
-                              task.completed ? "bg-muted/50" : "hover:bg-muted/30",
+                              selectedTaskIds.includes(task.id) 
+                                ? "ring-2 ring-primary ring-offset-1 dark:ring-offset-gray-800" 
+                                : (task.completed ? "bg-muted/50" : "hover:bg-muted/30"),
                             )}
                           >
                             <div className="flex items-start space-x-2">
                               <Checkbox
-                                checked={task.completed}
-                                onCheckedChange={() => toggleTaskCompletion(task.id)}
+                                checked={selectedTaskIds.includes(task.id)}
+                                onCheckedChange={(checked) => handleTaskSelection(task.id, checked === true)}
+                                aria-label={`选择任务 ${task.title}`}
                                 className="mt-0.5"
                               />
                               <div className="flex-1">
@@ -1553,9 +1881,28 @@ export function TasksView() {
                                     </Button>
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => toggleTaskCompletion(task.id)}>
+                                          {task.completed ? (
+                                            <><Undo className="h-4 w-4 mr-2" /> 标记为未完成</>
+                                          ) : (
+                                            <><Check className="h-4 w-4 mr-2" /> 标记为完成</>
+                                          )}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          编辑
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                        <DropdownMenuItem 
+                                          onClick={() => {
+                                            if(task.id === undefined) {
+                                              toast.error("任务ID无效，无法添加到时间轴。");
+                                              return;
+                                            }
+                                            handleAddTaskToTimeline(task);
+                                          }} 
+                                          disabled={task.completed}
+                                        >
                                           <CalendarDays className="h-4 w-4 mr-2" />
                                           添加到时间轴
                                         </DropdownMenuItem>
@@ -1602,13 +1949,16 @@ export function TasksView() {
                             key={task.id}
                             className={cn(
                               "border rounded-lg p-3 bg-white dark:bg-gray-800 transition-colors",
-                              task.completed ? "bg-muted/50" : "hover:bg-muted/30",
+                              selectedTaskIds.includes(task.id) 
+                                ? "ring-2 ring-primary ring-offset-1 dark:ring-offset-gray-800" 
+                                : (task.completed ? "bg-muted/50" : "hover:bg-muted/30"),
                             )}
                           >
                             <div className="flex items-start space-x-2">
                               <Checkbox
-                                checked={task.completed}
-                                onCheckedChange={() => toggleTaskCompletion(task.id)}
+                                checked={selectedTaskIds.includes(task.id)}
+                                onCheckedChange={(checked) => handleTaskSelection(task.id, checked === true)}
+                                aria-label={`选择任务 ${task.title}`}
                                 className="mt-0.5"
                               />
                               <div className="flex-1">
@@ -1638,9 +1988,28 @@ export function TasksView() {
                                     </Button>
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => openEditModal(task)}>编辑</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => toggleTaskCompletion(task.id)}>
+                                          {task.completed ? (
+                                            <><Undo className="h-4 w-4 mr-2" /> 标记为未完成</>
+                                          ) : (
+                                            <><Check className="h-4 w-4 mr-2" /> 标记为完成</>
+                                          )}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => openEditModal(task)}>
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          编辑
+                                        </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleToggleFrogStatus(task.id)}>{task.isFrog ? "取消标记为青蛙" : "标记为青蛙"}</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed}>
+                                        <DropdownMenuItem 
+                                          onClick={() => {
+                                            if(task.id === undefined) {
+                                              toast.error("任务ID无效，无法添加到时间轴。");
+                                              return;
+                                            }
+                                            handleAddTaskToTimeline(task);
+                                          }} 
+                                          disabled={task.completed}
+                                        >
                                           <CalendarDays className="h-4 w-4 mr-2" />
                                           添加到时间轴
                                         </DropdownMenuItem>
@@ -1722,6 +2091,8 @@ export function TasksView() {
         description="您确定要永久删除此任务吗？此操作无法撤销。"
         onConfirm={handlePermanentlyDeleteTask} 
       />
+      
+      {/* 批量删除确认对话框已移至组件 BatchOperationsBar */}
     </div>
   )
 }

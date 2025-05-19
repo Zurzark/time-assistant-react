@@ -9,57 +9,64 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { cn } from "@/lib/utils"
 import { useTaskStats } from "../task/task-stats-updater" // 调整导入路径
 import { FrogTaskModal } from "../task/frog-task-modal" // 调整导入路径
-import { EditTaskModal } from "../task/edit-task-modal" // 调整导入路径
+import { EditTaskDialog } from "../task/edit-task-dialog" // 新的导入
 import { DeleteTaskConfirm } from "../task/delete-task-confirm" // 调整导入路径
 // 注意: @/lib/db 的导入是动态的，将在组件内部处理
-import { getAll as getAllDB, add as addDB, ObjectStores as DBObjectStores, type TimeBlock as DBTimeBlock, type Task as DBTask } from "@/lib/db";
+import { getAll as getAllDB, add as addDB, update as updateDB, ObjectStores as DBObjectStores, type TimeBlock as DBTimeBlock, type Task as DBTask, Project as DBProjectType, get as getDB } from "@/lib/db";
 // 从 lib/utils.ts 导入共享函数
 import { formatTimeForDisplay, checkTimeOverlap } from "@/lib/utils";
+import { Task as TaskUtilsType, fromDBTaskShape, toDBTaskShape, priorityMapToDB } from "@/lib/task-utils"; // 导入任务工具类型和函数
+import { toast } from "sonner";
 
 interface FrogTasksCardProps {
   onPomodoroClick: (taskId: string, taskTitle: string) => void;
+  availableProjects?: DBProjectType[]; // Make availableProjects optional or provide a default
+  onCreateNewProject?: (name: string) => Promise<number | undefined>; // Optional or provide a default
 }
 
-export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
+// Define a more complete Task type for the component's state, aligning with TaskUtilsType
+interface UIFrogTask extends TaskUtilsType {
+  // any specific fields for UI if needed, but TaskUtilsType should be comprehensive
+}
+
+export function FrogTasksCard({ 
+  onPomodoroClick,
+  availableProjects = [], // Default to empty array
+  onCreateNewProject // Default to a function that does nothing or warns
+}: FrogTasksCardProps) {
   const { updateTaskStats, addTasks: _addTasksToStats, removeTasks } = useTaskStats()
 
   // 状态管理
-  const [tasks, setTasks] = useState<Array<{id: string | number, title: string, completed: boolean, isFrog?: 0 | 1, estimatedPomodoros?: number}>>([])
+  const [tasks, setTasks] = useState<UIFrogTask[]>([])
   const [loading, setLoading] = useState(true)
   const [frogTaskModalOpen, setFrogTaskModalOpen] = useState(false)
   const [editTaskModalOpen, setEditTaskModalOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
-  const [currentTask, setCurrentTask] = useState<{ id: string; title: string } | null>(null)
+  const [currentTaskForEdit, setCurrentTaskForEdit] = useState<TaskUtilsType | null>(null); // New type for editing
+  const [taskToDelete, setTaskToDelete] = useState<{ id: string | number; title: string } | null>(null);
+
   
   // 从 IndexedDB 加载青蛙任务
   const loadFrogTasks = useCallback(async () => {
     try {
       setLoading(true)
       
-      // 从 IndexedDB 获取所有青蛙任务
       const { getByIndex, ObjectStores } = await import('@/lib/db')
-      const frogTasksDB = await getByIndex(
+      const frogTasksDB = await getByIndex<DBTask>(
         ObjectStores.TASKS,
         'byIsFrog',
-        1  // 使用数字 1 代替布尔值 true
+        1 
       )
       
-      // 过滤出未删除的任务
-      const activeFrogTasks = frogTasksDB.filter(
-        (task: any) => !task.isDeleted && task.isFrog
-      )
+      const activeFrogTasks = frogTasksDB
+        .filter((task: DBTask) => !task.isDeleted && task.isFrog && task.id !== undefined)
+        .map(task => fromDBTaskShape(task)); // Convert DBTask to TaskUtilsType
       
-      // 更新状态
-      setTasks(
-        activeFrogTasks.map((task: any) => ({
-          id: task.id,
-          title: task.title,
-          completed: task.completed
-        }))
-      )
+      setTasks(activeFrogTasks as UIFrogTask[]); // Cast to UIFrogTask (should be compatible)
       
     } catch (error) {
       console.error('加载青蛙任务时出错:', error)
+      toast.error("加载青蛙任务失败。");
     } finally {
       setLoading(false)
     }
@@ -97,9 +104,27 @@ export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
   }
 
   // 处理编辑任务
-  const handleEditTask = (taskId: string | number, taskTitle: string) => {
-    setCurrentTask({ id: String(taskId), title: taskTitle })
-    setEditTaskModalOpen(true)
+  const handleEditTask = async (taskId: string | number) => {
+    const taskToEdit = tasks.find(t => t.id === taskId);
+    if (taskToEdit) {
+      setCurrentTaskForEdit(taskToEdit);
+      setEditTaskModalOpen(true);
+    } else {
+      // Fallback: if not in local state (should not happen if UI is synced),
+      // try to fetch from DB directly. This is a safeguard.
+      try {
+        const taskFromDB = await getDB<DBTask>(DBObjectStores.TASKS, Number(taskId));
+        if (taskFromDB && !taskFromDB.isDeleted && taskFromDB.isFrog) {
+          setCurrentTaskForEdit(fromDBTaskShape(taskFromDB));
+          setEditTaskModalOpen(true);
+        } else {
+          toast.error("无法找到要编辑的青蛙任务。");
+        }
+      } catch (err) {
+        console.error("获取任务详情失败:", err);
+        toast.error("获取任务详情失败。");
+      }
+    }
   }
 
   // 处理添加到时间轴
@@ -216,71 +241,129 @@ export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
 
   // 处理删除任务
   const handleDeleteTask = (taskId: string | number, taskTitle: string) => {
-    setCurrentTask({ id: String(taskId), title: taskTitle })
+    setTaskToDelete({ id: taskId, title: taskTitle });
     setDeleteConfirmOpen(true)
   }
 
   // 确认删除任务
-  const confirmDeleteTask = () => {
-    if (currentTask) {
-      // 在 IndexedDB 中标记为删除
-      removeTasks([currentTask.id])
-      
-      // 从本地状态中移除
-      setTasks(prev => prev.filter(task => task.id != currentTask.id))
-      
-      setDeleteConfirmOpen(false)
-      setCurrentTask(null)
+  const confirmDeleteTask = async () => {
+    if (taskToDelete) {
+      try {
+        const taskInDB = await getDB<DBTask>(DBObjectStores.TASKS, Number(taskToDelete.id));
+        if (taskInDB) {
+          taskInDB.isDeleted = 1;
+          taskInDB.deletedAt = new Date();
+          taskInDB.updatedAt = new Date();
+          await updateDB(DBObjectStores.TASKS, taskInDB);
+          toast.success(`任务 "${taskToDelete.title}" 已移至回收站。`);
+          // Optimistically update UI or reload
+          setTasks(prev => prev.filter(task => task.id !== taskToDelete.id));
+          if (typeof removeTasks === 'function') { // Check if removeTasks from useTaskStats is available
+             removeTasks([Number(taskToDelete.id)]); // Update global stats if applicable
+          }
+        } else {
+          toast.error("无法在数据库中找到要删除的任务。");
+        }
+      } catch (err) {
+        console.error("删除任务时出错:", err);
+        toast.error("删除任务失败。");
+      } finally {
+        setDeleteConfirmOpen(false)
+        setTaskToDelete(null)
+      }
     }
   }
 
   // 保存编辑后的任务 - 更新到 IndexedDB
-  const saveEditedTask = async (editedTask: any) => {
+  const handleUpdateTaskInFrogCard = async (updatedTaskData: TaskUtilsType) => {
+    if (!currentTaskForEdit || currentTaskForEdit.id === undefined) {
+      toast.error("没有当前任务可供更新。");
+      return;
+    }
     try {
-      // 找到原始任务以保留其完成状态
-      const originalTask = tasks.find(t => t.id == editedTask.id);
-      const completed = originalTask ? originalTask.completed : false;
-      
-      // 准备更新到 IndexedDB 的任务对象
-      const updatedTaskData = {
-        id: editedTask.id,
-        title: editedTask.title,
-        completed: completed, // 保留原始完成状态
-        isFrog: true,
-        dueDate: editedTask.dueDate || new Date(),
-        // 确保包含 TaskStatsProvider 所需的 StatsTask 兼容字段
-        priority: originalTask ? (originalTask as any).priority : "importantNotUrgent", 
-        createdAt: new Date(), 
+      const originalTaskInDB = await getDB<DBTask>(DBObjectStores.TASKS, currentTaskForEdit.id);
+      if (!originalTaskInDB) {
+        toast.error("在数据库中找不到原始任务。");
+        return;
+      }
+
+      const payloadForDB: DBTask = {
+        ...originalTaskInDB, // Start with existing DB data to preserve fields not in TaskUtilsType or form
+        ...(toDBTaskShape(updatedTaskData)), // Apply general shape transformation from TaskUtilsType to DB shape
+        // Ensure specific fields from form/updatedTaskData are preserved if toDBTaskShape doesn't cover all or maps differently
+        title: updatedTaskData.title,
+        description: updatedTaskData.description,
+        priority: priorityMapToDB[updatedTaskData.priority] || originalTaskInDB.priority,
+        dueDate: updatedTaskData.dueDate, // toDBTaskShape should handle Date to string/Date conversion if necessary for DB
+        projectId: typeof updatedTaskData.projectId === 'string' ? parseInt(updatedTaskData.projectId) : updatedTaskData.projectId,
+        tags: updatedTaskData.tags || [],
+        isFrog: 1, // It's a frog card, so ensure isFrog is true
         updatedAt: new Date(),
-        isDeleted: 0,
-        description: "",
-        isRecurring: 0,
+        category: updatedTaskData.category,
+        plannedDate: updatedTaskData.plannedDate,
+        estimatedDurationHours: updatedTaskData.estimatedDurationHours,
+        isRecurring: updatedTaskData.isRecurring ? 1 : 0, // Explicitly convert boolean to 0 | 1
+        recurrenceRule: updatedTaskData.recurrenceRule,
+        recurrenceEndDate: updatedTaskData.recurrenceEndDate,
+        recurrenceCount: updatedTaskData.recurrenceCount,
+        // Ensure `completed` status is correctly handled based on `updatedTaskData` or preserved if not editable in this form context
+        completed: updatedTaskData.completed ? 1 : 0, 
+        completedAt: updatedTaskData.completed ? (originalTaskInDB.completedAt || new Date()) : undefined,
+      };
+      
+      // Remove undefined keys to avoid overwriting existing DB fields with undefined, except for those explicitly set to undefined (e.g. completedAt)
+      Object.keys(payloadForDB).forEach(key => {
+        const K = key as keyof DBTask;
+        if (payloadForDB[K] === undefined && K !== 'completedAt' && K !== 'projectId' && K !== 'description' && K !== 'dueDate' && K !== 'goalId' && K !== 'reminderDate' && K !== 'recurrenceRule' && K !== 'recurrenceEndDate' && K !== 'recurrenceCount' && K !== 'plannedDate' && K !== 'order' && K !== 'deletedAt') {
+          delete payloadForDB[K];
+        }
+      });
+
+      await updateDB(DBObjectStores.TASKS, payloadForDB);
+      toast.success(`青蛙任务 "${updatedTaskData.title}" 已更新。`);
+      if (typeof updateTaskStats === 'function') {
+         updateTaskStats(updatedTaskData.id, !!updatedTaskData.completed); // Update global stats
       }
       
-      // 更新任务到 IndexedDB
-      const { update, ObjectStores: DBObjectStores } = await import('@/lib/db'); // 正确导入 ObjectStores
-      await update(DBObjectStores.TASKS, updatedTaskData as any); 
-      _addTasksToStats([updatedTaskData as any]); // Notify stats updater
-      
-      // 重新加载任务以获取最新数据
-      await loadFrogTasks()
-      
-      setEditTaskModalOpen(false)
-      setCurrentTask(null)
     } catch (error) {
       console.error('保存编辑任务时出错:', error)
+      toast.error("保存青蛙任务失败。");
+    } finally {
+      setEditTaskModalOpen(false)
+      loadFrogTasks() // Reload tasks to reflect changes
     }
   }
-  
-  // 当 FrogTaskModal 完成添加/创建青蛙任务后被调用
-  const handleFrogTasksAddedFromModal = async (taskIds: string[]) => {
-    // Modal 内部已经处理了数据库的写入和 useTaskStats 的更新
-    // 这里只需要重新加载当前组件的青蛙任务列表即可
-    await loadFrogTasks();
+
+  const defaultCreateNewProject = async (name: string): Promise<number | undefined> => {
+    // This is a fallback. Ideally, this component receives this from a parent 
+    // that has the full context for project creation (e.g., access to all projects for validation).
+    console.warn("FrogTasksCard: onCreateNewProject prop was not provided. Using default (no-op or basic add).");
+    try {
+        const newProjectData: Omit<DBProjectType, 'id'> = {
+            name: name.trim(),
+            status: 'active',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            progress: 0,
+            description: "",
+            totalTasks: 0,
+            completedTasks: 0,
+        };
+        const newId = await addDB(DBObjectStores.PROJECTS, newProjectData as DBProjectType);
+        // Note: This card might not have access to reload a global project list, 
+        // so the new project might not immediately appear in a shared project dropdown 
+        // unless a more global state management for projects is in place.
+        toast.success(`项目 "${name}" 已在 FrogTasksCard 内创建 (ID: ${newId}).`);
+        return newId;
+    } catch (err) {
+        console.error("Failed to create new project from FrogTasksCard default handler:", err);
+        toast.error("在 FrogTasksCard 内创建新项目失败。");
+        return undefined;
+    }
   };
 
   return (
-    <Card>
+    <Card className="h-full flex flex-col">
       <CardHeader className="pb-2">
         <CardTitle className="text-md font-medium">今日青蛙任务</CardTitle>
         <CardDescription>最重要但可能最难开始的任务</CardDescription>
@@ -339,7 +422,7 @@ export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleEditTask(task.id, task.title)}>
+                    <DropdownMenuItem onClick={() => handleEditTask(task.id)}>
                       编辑
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleAddToTimeline(task)}>
@@ -358,39 +441,40 @@ export function FrogTasksCard({ onPomodoroClick }: FrogTasksCardProps) {
           </div>
         )}
       </CardContent>
-      <CardFooter className="pt-2">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="w-full"
-          onClick={() => setFrogTaskModalOpen(true)}  
-        >
+      <CardFooter className="mt-auto">
+        <Button variant="outline" className="w-full" onClick={() => setFrogTaskModalOpen(true)}>
           添加青蛙任务
         </Button>
       </CardFooter>
 
-      {/* 青蛙任务模态框 */}
+      {/* 弹窗：添加青蛙任务 */}
       <FrogTaskModal
         open={frogTaskModalOpen}
         onOpenChange={setFrogTaskModalOpen}
-        onAddFrogTasks={handleFrogTasksAddedFromModal} // 使用修正后的回调
+        onAddFrogTasks={(taskIds) => loadFrogTasks()}
       />
-      
-      {/* 编辑任务模态框 */}
-      <EditTaskModal
-        open={editTaskModalOpen}
-        onOpenChange={setEditTaskModalOpen}
-        task={currentTask}
-        onSave={saveEditedTask}
-      />
-      
-      {/* 删除确认对话框 */}
-      <DeleteTaskConfirm
-        open={deleteConfirmOpen}
-        onOpenChange={setDeleteConfirmOpen}
-        taskTitle={currentTask?.title || ""}
-        onConfirm={confirmDeleteTask}
-      />
+
+      {/* 弹窗：编辑任务 - 使用新的 EditTaskDialog */}
+      {editTaskModalOpen && currentTaskForEdit && (
+        <EditTaskDialog
+          open={editTaskModalOpen}
+          onOpenChange={setEditTaskModalOpen}
+          task={currentTaskForEdit} 
+          onSave={handleUpdateTaskInFrogCard}
+          availableProjects={availableProjects} // Pass down available projects
+          onCreateNewProject={onCreateNewProject || defaultCreateNewProject} // Pass down or use default
+        />
+      )}
+
+      {/* 弹窗：删除任务确认 */}
+      {taskToDelete && (
+        <DeleteTaskConfirm
+          open={deleteConfirmOpen}
+          onOpenChange={setDeleteConfirmOpen}
+          taskTitle={taskToDelete.title}
+          onConfirm={confirmDeleteTask}
+        />
+      )}
     </Card>
   )
 } 

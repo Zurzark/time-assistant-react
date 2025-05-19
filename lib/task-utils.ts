@@ -1,6 +1,7 @@
 import { Task as DBTaskType } from "@/lib/db";
 
 export type TaskPriority = "important-urgent" | "important-not-urgent" | "not-important-urgent" | "not-important-not-urgent";
+export type TaskCategory = "next_action" | "someday_maybe" | "waiting_for";
 
 export interface Task {
   id: number;
@@ -13,9 +14,16 @@ export interface Task {
   tags: string[];
   dueDate?: Date;
   subtasks: { id: number; title: string; completed: boolean }[];
-  estimatedPomodoros?: number;
   createdAt: Date; // 创建时间
   completedAt?: Date; // 完成时间
+
+  category: TaskCategory;
+  plannedDate?: Date;
+  estimatedDurationHours?: number;
+  isRecurring: boolean;
+  recurrenceRule?: string;
+  recurrenceEndDate?: Date;
+  recurrenceCount?: number;
 }
 
 export const NO_PROJECT_VALUE = "NO_PROJECT";
@@ -56,9 +64,16 @@ export const fromDBTaskShape = (dbTask: DBTaskType): Task => {
       title: st.title,
       completed: st.completed === 1,
     })) || [],
-    estimatedPomodoros: dbTask.estimatedPomodoros,
     createdAt: new Date(dbTask.createdAt),
     completedAt: dbTask.completedAt ? new Date(dbTask.completedAt) : undefined,
+
+    category: (dbTask.category as TaskCategory) || "next_action",
+    plannedDate: dbTask.plannedDate ? new Date(dbTask.plannedDate) : undefined,
+    estimatedDurationHours: dbTask.estimatedDurationHours,
+    isRecurring: dbTask.isRecurring === 1,
+    recurrenceRule: dbTask.recurrenceRule as string|undefined,
+    recurrenceEndDate: dbTask.recurrenceEndDate ? new Date(dbTask.recurrenceEndDate) : undefined,
+    recurrenceCount: dbTask.recurrenceCount,
   };
 };
 
@@ -69,26 +84,14 @@ export const toDBTaskShape = (task: Partial<Task>): Partial<Omit<DBTaskType, 'id
   if (task.hasOwnProperty('description') && typeof task.description === 'string') dbShape.description = task.description;
   if (task.priority) dbShape.priority = priorityMapToDB[task.priority];
   
-  if (typeof task.completed === 'boolean') {
-    dbShape.completed = task.completed ? 1 : 0;
-    if (task.hasOwnProperty('completedAt')) {
-      dbShape.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
-    } else if (task.completed) {
-      // If task is marked complete and completedAt is not given, set to now.
-      // This aligns with toggleTaskCompletion implicitly setting to now.
-      dbShape.completedAt = new Date(); 
-    } else {
-      // If task is marked incomplete, completedAt must be undefined.
-      dbShape.completedAt = undefined; 
-    }
-  } else if (task.hasOwnProperty('completedAt')) {
-    // If completed status is not changing, but completedAt is explicitly provided (e.g. null)
-     dbShape.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
-  }
-
   if (typeof task.isFrog === 'boolean') dbShape.isFrog = task.isFrog ? 1 : 0;
   if (task.tags) dbShape.tags = task.tags;
-  if (task.hasOwnProperty('dueDate')) dbShape.dueDate = task.dueDate ? new Date(task.dueDate) : undefined;
+  
+  if (task.hasOwnProperty('isRecurring') && task.isRecurring && task.recurrenceRule) {
+    dbShape.dueDate = undefined;
+  } else if (task.hasOwnProperty('dueDate')) {
+    dbShape.dueDate = task.dueDate ? new Date(task.dueDate) : undefined;
+  }
   
   if (task.hasOwnProperty('projectId')) {
     dbShape.projectId = task.projectId; 
@@ -97,8 +100,44 @@ export const toDBTaskShape = (task: Partial<Task>): Partial<Omit<DBTaskType, 'id
   if (task.subtasks) {
     dbShape.subtasks = task.subtasks.map(st => ({ title: st.title, completed: (st.completed ? 1 : 0) as (0|1) }));
   }
-  if (task.hasOwnProperty('estimatedPomodoros')) {
-    dbShape.estimatedPomodoros = task.estimatedPomodoros;
+
+  if (task.hasOwnProperty('category')) dbShape.category = task.category;
+  if (task.hasOwnProperty('plannedDate')) dbShape.plannedDate = task.plannedDate ? new Date(task.plannedDate) : undefined;
+  if (task.hasOwnProperty('estimatedDurationHours')) dbShape.estimatedDurationHours = task.estimatedDurationHours;
+  
+  if (typeof task.isRecurring === 'boolean') {
+    dbShape.isRecurring = task.isRecurring ? 1 : 0;
+    if (task.hasOwnProperty('recurrenceRule')) {
+        dbShape.recurrenceRule = task.recurrenceRule;
+    }
+    if (task.hasOwnProperty('recurrenceEndDate')) {
+        dbShape.recurrenceEndDate = task.recurrenceEndDate ? new Date(task.recurrenceEndDate) : undefined;
+    } else if (task.isRecurring && task.recurrenceRule && !task.hasOwnProperty('recurrenceEndDate')) {
+        dbShape.recurrenceEndDate = undefined;
+    }
+    if (task.hasOwnProperty('recurrenceCount')) {
+        dbShape.recurrenceCount = task.recurrenceCount;
+    } else if (task.isRecurring && task.recurrenceRule && !task.hasOwnProperty('recurrenceCount')) {
+        dbShape.recurrenceCount = undefined;
+    }
+
+  } else {
+     if (task.hasOwnProperty('recurrenceRule')) dbShape.recurrenceRule = task.recurrenceRule;
+     if (task.hasOwnProperty('recurrenceEndDate')) dbShape.recurrenceEndDate = task.recurrenceEndDate ? new Date(task.recurrenceEndDate) : undefined;
+     if (task.hasOwnProperty('recurrenceCount')) dbShape.recurrenceCount = task.recurrenceCount;
+  }
+
+  if (typeof task.completed === 'boolean') {
+    dbShape.completed = task.completed ? 1 : 0;
+    if (task.hasOwnProperty('completedAt')) {
+      dbShape.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
+    } else if (task.completed) {
+      dbShape.completedAt = new Date(); 
+    } else {
+      dbShape.completedAt = undefined; 
+    }
+  } else if (task.hasOwnProperty('completedAt')) {
+    dbShape.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
   }
   
   return dbShape;

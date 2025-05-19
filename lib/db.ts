@@ -613,7 +613,7 @@ export interface Task {
   id?: number;
   title: string;
   description?: string;
-  priority?: 'importantUrgent' | 'importantNotUrgent' | 'notImportantUrgent' | 'notImportantNotUrgent' | number;
+  priority?: 'importantUrgent' | 'importantNotUrgent' | 'notImportantUrgent' | 'notImportantNotUrgent';
   dueDate?: Date;
   completed: 0 | 1;
   completedAt?: Date;
@@ -622,7 +622,6 @@ export interface Task {
   projectId?: number;
   goalId?: number | string;
   isFrog: 0 | 1;
-  estimatedPomodoros?: number;
   actualPomodoros?: number;
   subtasks?: { title: string; completed: 0 | 1 }[];
   tags?: string[];
@@ -633,6 +632,10 @@ export interface Task {
   order?: number;
   isDeleted: 0 | 1;
   deletedAt?: Date;
+  category?: string;
+  estimatedDurationHours?: number;
+  recurrenceEndDate?: Date;
+  recurrenceCount?: number;
 }
 
 export interface Category {

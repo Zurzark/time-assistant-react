@@ -41,23 +41,6 @@ import {
 import { cn } from "@/lib/utils"
 import { type TimeBlock as DBTimeBlock, ObjectStores, getByIndex as getDBByIndex, remove as removeDB, add as addDB, update as updateDB, get as getDBItem, FixedBreakRule, getAll as getAllDB } from "@/lib/db"
 import { useToast } from "@/components/ui/use-toast"
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragStartEvent,
-  DragEndEvent,
-  UniqueIdentifier,
-  useDraggable,
-} from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
-
-// Constants for DND behavior
-const PIXELS_PER_MINUTE_TIMELINE = 1; // Assumption: 1 pixel of vertical drag = 1 minute change. This should be calibrated.
-const SNAP_GRID_MINUTES = 15; // Snap to 15-minute intervals.
-const MIN_DURATION_MINUTES = 15; // Minimum duration for a time block.
-
 
 interface UITimeBlock extends DBTimeBlock {
   id: number;
@@ -105,10 +88,9 @@ interface TimelineCardProps {
 }
 
 
-// Helper components for DND
+// Helper components for DND - Now simplified
 interface TimelineBlockItemContentProps {
   block: UITimeBlock;
-  isActuallyDragging: boolean; 
   onPomodoroClick: (taskId: string, taskTitle: string) => void;
   handleOpenEditModal: (block: UITimeBlock) => void;
   handleDeleteBlock: (blockId: number, blockTitle: string) => void;
@@ -117,35 +99,21 @@ interface TimelineBlockItemContentProps {
   currentTime: Date;
 }
 
-const TimelineBlockItemContent: FC<TimelineBlockItemContentProps & {
-  attributes: Record<string, any>;
-  listeners: Record<string, any>;
-  refForward: (node: HTMLElement | null) => void;
-  style?: React.CSSProperties;
-}> = ({
+const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
   block,
-  isActuallyDragging,
   onPomodoroClick,
   handleOpenEditModal,
   handleDeleteBlock,
   getIconForType,
   getDisplayType,
   currentTime,
-  attributes,
-  listeners,
-  refForward,
-  style
 }) => {
   const isCurrent = currentTime >= block.startTime && currentTime < block.endTime;
   const typeDisplay = getDisplayType(block.type);
 
   return (
     <div
-      ref={refForward}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={cn(isActuallyDragging ? "opacity-70 shadow-2xl" : "", "transition-shadow")} 
+      className={cn("transition-shadow")}
     >
       <div className="relative pl-8 pb-4">
         <div
@@ -173,7 +141,6 @@ const TimelineBlockItemContent: FC<TimelineBlockItemContentProps & {
               : block.type === "break"
                 ? (block.fixedBreakId ? "border-teal-200 bg-teal-50 dark:bg-teal-950 dark:border-teal-700" : "border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-700")
                 : "border-gray-200 bg-white dark:bg-gray-800 dark:border-gray-700",
-            isActuallyDragging ? "ring-2 ring-primary" : ""
           )}
         >
           <div className="flex items-center justify-between mb-1">
@@ -210,7 +177,8 @@ const TimelineBlockItemContent: FC<TimelineBlockItemContentProps & {
               )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" disabled={isActuallyDragging}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" 
+                  >
                     <MoreHorizontal className="h-3.5 w-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -234,203 +202,40 @@ const TimelineBlockItemContent: FC<TimelineBlockItemContentProps & {
   );
 };
 
-const DraggableTimelineBlock: FC<{ block: UITimeBlock; activeDndId: UniqueIdentifier | null; } & Omit<TimelineBlockItemContentProps, 'block' | 'isActuallyDragging'>> = ({ block, activeDndId, ...contentProps }) => {
-  const { attributes, listeners, setNodeRef, transform, active } = useDraggable({
-    id: String(block.id),
-  });
-
-  const isActuallyDragging = active?.id === String(block.id);
-
-  const style: React.CSSProperties = {
-    transform: CSS.Translate.toString(transform),
-    transition: active?.id === String(block.id) ? 'none' : 'transform 0.2s ease-out', 
-    zIndex: isActuallyDragging ? 1000 : 'auto', 
-  };
-
-  return (
-    <TimelineBlockItemContent
-      block={block}
-      isActuallyDragging={isActuallyDragging}
-      {...contentProps}
-      attributes={attributes}
-      listeners={listeners}
-      refForward={setNodeRef}
-      style={style}
-    />
-  );
-};
-
-
 export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const { toast } = useToast();
   const [timeBlocks, setTimeBlocks] = useState<UITimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"add" | "edit">("add");
   const [currentEditingBlock, setCurrentEditingBlock] = useState<UITimeBlock | null>(null);
-  const [modalFormData, setModalFormData] = useState<ModalFormData>({
-    title: '',
-    type: 'task',
-    startTime: formatDateToDateTimeLocal(new Date()),
-    endTime: formatDateToDateTimeLocal(new Date(Date.now() + 60 * 60 * 1000)),
+  const [formData, setFormData] = useState<ModalFormData>({
+    title: "",
+    type: "task",
+    startTime: "",
+    endTime: "",
+    taskId: undefined,
   });
 
   const isProcessingFixedBreaksRef = useRef(false);
 
-  // DND States
-  const [activeDndId, setActiveDndId] = useState<UniqueIdentifier | null>(null);
-  const [initialDragBlockState, setInitialDragBlockState] = useState<UITimeBlock | null>(null);
+  const todayDateString = getTodayDateString();
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8, // User must drag for 8px before DND starts
-      },
-    })
-  );
-
-  const handleDragStart = (event: DragStartEvent) => {
-    const { active } = event;
-    setActiveDndId(active.id);
-    const draggedBlock = timeBlocks.find(b => String(b.id) === String(active.id));
-    if (draggedBlock) {
-      setInitialDragBlockState(JSON.parse(JSON.stringify(draggedBlock))); // Deep copy
-    }
-  };
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    setActiveDndId(null); 
-
-    if (!initialDragBlockState || !event.active) {
-      setInitialDragBlockState(null);
-      return;
-    }
-
-    const originalBlockSnapshot = initialDragBlockState; 
-    const { delta } = event; 
-
-    let newStartTime = new Date(originalBlockSnapshot.startTime);
-    let newEndTime = new Date(originalBlockSnapshot.endTime);
-    const minutesOffset = Math.round(delta.y / PIXELS_PER_MINUTE_TIMELINE);
-
-    newStartTime.setMinutes(newStartTime.getMinutes() + minutesOffset);
-    newEndTime.setMinutes(newEndTime.getMinutes() + minutesOffset);
-    
-    newStartTime.setSeconds(0, 0); 
-    newEndTime.setSeconds(0, 0);
-    newStartTime.setMinutes(Math.round(newStartTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES);
-    newEndTime.setMinutes(Math.round(newEndTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES);
-
-    const todayString = getTodayDateString();
-    const dayStart = new Date(new Date(`${todayString}T00:00:00`).setSeconds(0,0));
-    const dayEnd = new Date(new Date(`${todayString}T23:59:59`).setSeconds(59,999));
-
-    if (newStartTime < dayStart) newStartTime = dayStart;
-    if (newEndTime > dayEnd) newEndTime = dayEnd;
-    
-    if (newStartTime.getTime() >= dayEnd.getTime()) {
-        newStartTime = new Date(dayEnd.getTime() - MIN_DURATION_MINUTES * 60000);
-        newStartTime.setMinutes(Math.round(newStartTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
-    }
-    if (newEndTime.getTime() <= newStartTime.getTime()) { 
-        const originalDuration = originalBlockSnapshot.endTime.getTime() - originalBlockSnapshot.startTime.getTime();
-        newEndTime = new Date(newStartTime.getTime() + originalDuration);
-        newEndTime.setMinutes(Math.round(newEndTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
-        if (newEndTime.getTime() > dayEnd.getTime()) newEndTime = dayEnd; 
-    }
-
-
-    const minDurationMillis = MIN_DURATION_MINUTES * 60000;
-    let currentDurationMillis = newEndTime.getTime() - newStartTime.getTime();
-
-    if (currentDurationMillis < minDurationMillis) {
-        newEndTime = new Date(newStartTime.getTime() + minDurationMillis);
-        newEndTime.setMinutes(Math.round(newEndTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
-        if (newEndTime.getTime() > dayEnd.getTime()) {
-            newEndTime = dayEnd;
-            newStartTime = new Date(newEndTime.getTime() - minDurationMillis);
-            newStartTime.setMinutes(Math.round(newStartTime.getMinutes() / SNAP_GRID_MINUTES) * SNAP_GRID_MINUTES, 0, 0);
-            if (newStartTime.getTime() < dayStart.getTime()) newStartTime = dayStart; 
-        }
-        currentDurationMillis = newEndTime.getTime() - newStartTime.getTime(); 
-        if (currentDurationMillis < minDurationMillis || newEndTime.getTime() <= newStartTime.getTime()) { 
-             toast({ title: "操作无效", description: `时长至少为 ${MIN_DURATION_MINUTES} 分钟，且结束时间需晚于开始时间。已还原。`, variant: "destructive" });
-             setInitialDragBlockState(null);
-             return;
-        }
-    }
-
-    let collisionDetected = false;
-    for (const existingBlock of timeBlocks) {
-      if (existingBlock.id === originalBlockSnapshot.id) continue; 
-
-      const existingStart = new Date(existingBlock.startTime);
-      const existingEnd = new Date(existingBlock.endTime);
-
-      if (newStartTime.getTime() < existingEnd.getTime() && newEndTime.getTime() > existingStart.getTime()) {
-        collisionDetected = true;
-        break;
-      }
-    }
-
-    if (collisionDetected) {
-      toast({ title: "操作无效", description: "时间块与现有安排重叠。已还原。", variant: "destructive" });
-      setInitialDragBlockState(null);
-      return;
-    }
-
-    const blockToUpdateFromState = timeBlocks.find(b => b.id === originalBlockSnapshot.id);
-    if (!blockToUpdateFromState) {
-        console.error("Error: Could not find the block to update in current state array.");
-        setInitialDragBlockState(null);
-        return;
-    }
-    
-    const updatedBlockData: DBTimeBlock = {
-      ...blockToUpdateFromState, 
-      id: originalBlockSnapshot.id, 
-      startTime: newStartTime,
-      endTime: newEndTime,
-      date: newStartTime.toISOString().split('T')[0], 
-      updatedAt: new Date(),
-    };
-
-    if (updatedBlockData.fixedBreakId) {
-      delete updatedBlockData.fixedBreakId;
-      toast({ title: "提示", description: "固定休息块已转为普通时间块。", duration: 3500, variant: "default" });
-    }
-
-    try {
-      setLoading(true);
-      await updateDB(ObjectStores.TIME_BLOCKS, updatedBlockData);
-      toast({ title: "时间轴已更新", description: `时间块 "${updatedBlockData.title}" 已成功调整。` });
-      await loadTimeBlocks("drag_end_successful_update"); 
-    } catch (err) {
-      console.error("Failed to update time block after drag:", err);
-      toast({ title: "更新失败", description: "无法保存时间块更改，请重试。", variant: "destructive" });
-    } finally {
-      setLoading(false);
-      setInitialDragBlockState(null);
-    }
-  };
-
-
-  const loadTimeBlocks = useCallback(async (triggeredBy?: string) => {
-    console.log(`loadTimeBlocks triggered. Source: ${triggeredBy || 'initial/unknown'}. Lock status: ${isProcessingFixedBreaksRef.current}`);
-    if (isProcessingFixedBreaksRef.current && triggeredBy !== "drag_end_successful_update" && triggeredBy !== "modal_save" && triggeredBy !== "delete_block" ) {
-      console.warn("loadTimeBlocks: Processing already in progress by another operation. Skipping this call to avoid conflict.");
+  const fetchTimeBlocks = useCallback(async () => {
+    console.log(`fetchTimeBlocks triggered. Lock status: ${isProcessingFixedBreaksRef.current}`);
+    if (isProcessingFixedBreaksRef.current) {
+      console.warn("fetchTimeBlocks: Processing already in progress by another operation. Skipping this call to avoid conflict.");
       return;
     }
 
     isProcessingFixedBreaksRef.current = true;
-    setError(null); 
-    // setLoading(true); // setLoading is handled by specific operations like dragEnd or initial useEffect
+    setError(null);
 
     try {
-      const todayString = getTodayDateString();
-      const todayDateObj = new Date(todayString + 'T00:00:00');
+      const todayDateObj = new Date(todayDateString + 'T00:00:00');
       const dayOfWeekToday = todayDateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
 
       const allFixedRules = await getAllDB<FixedBreakRule>(ObjectStores.FIXED_BREAK_RULES);
@@ -440,7 +245,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         rule.daysOfWeek.includes(dayOfWeekToday)
       );
 
-      const initialExistingBlocks = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayString);
+      const initialExistingBlocks = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayDateString);
       const blocksToAdd: Omit<DBTimeBlock, 'id'>[] = [];
       const processedFixedBreakIdsInThisRun = new Set<string>(); 
 
@@ -451,7 +256,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         if (processedFixedBreakIdsInThisRun.has(fixedBreakIdStr)) continue; 
 
         const alreadyExistsInInitialLoad = initialExistingBlocks.some(
-          block => block.fixedBreakId === fixedBreakIdStr && block.type === 'break' && block.date === todayString
+          block => block.fixedBreakId === fixedBreakIdStr && block.type === 'break' && block.date === todayDateString
         );
 
         if (!alreadyExistsInInitialLoad) {
@@ -465,7 +270,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           endTime.setHours(endHour, endMinute, 0, 0);
           
           if (endTime.getTime() <= startTime.getTime()) { // use getTime for comparison
-              console.warn(`Invalid fixed break rule (end <= start): ${rule.label || rule.id} for ${todayString}`);
+              console.warn(`Invalid fixed break rule (end <= start): ${rule.label || rule.id} for ${todayDateString}`);
               continue;
           }
 
@@ -474,7 +279,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
             type: 'break',
             startTime: startTime,
             endTime: endTime,
-            date: todayString,
+            date: todayDateString,
             fixedBreakId: fixedBreakIdStr,
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -495,7 +300,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         }
       }
 
-      const allTodayDbBlocksFromDB = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayString);
+      const allTodayDbBlocksFromDB = await getDBByIndex<DBTimeBlock>(ObjectStores.TIME_BLOCKS, 'byDate', todayDateString);
       const validRuleIdsFromSettings = new Set(allFixedRules.map(rule => String(rule.id)));
       const blocksToRemoveIds: number[] = [];
 
@@ -542,39 +347,41 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         })();
       }
 
-    } catch (err) {
-      console.error("Failed to load time blocks:", err);
-      setError("无法加载今日时间轴数据。");
-      // Don't toast here if a more specific error is toasted by the caller
-      if (!triggeredBy?.includes("drag_end") && !triggeredBy?.includes("modal_save")) {
-        toast({
-            title: "加载失败",
-            description: "无法加载时间轴数据。",
-            variant: "destructive",
-        });
-      }
+    } catch (err: any) {
+      console.error("Error in fetchTimeBlocks:", err);
+      setError(err.message || "无法加载时间块数据。");
+      setTimeBlocks([]); // Clear blocks on error
     } finally {
       isProcessingFixedBreaksRef.current = false;
-      // setLoading(false) should be handled by the caller if it set it to true
-      // However, for general calls like initial load or error retry, set it here.
-      if (triggeredBy === "useEffect initial mount" || triggeredBy === "useEffect timelineShouldUpdate event" || triggeredBy === "error_retry_button") {
-        setLoading(false); 
+      // setLoading(false) is handled by callers after fetchTimeBlocks completes or in their error handling.
+      // However, if a setLoading(true) was initiated by a general refresh/load that calls this directly,
+      // this is a place to ensure loading is false. The current structure has callers manage it.
+      // For safety, and given the previous logic, we ensure it's set to false IF it was true.
+      // This implies `setLoading(true)` should be called before `fetchTimeBlocks` if a loading state is desired.
+      if (loadingRef.current) { // Use a ref to check if the current operation set loading to true
+         setLoading(false);
+         loadingRef.current = false; // Reset ref
       }
-      console.log("loadTimeBlocks finished. Lock released.");
+      console.log("fetchTimeBlocks finished. Lock released."); // Removed triggeredBy from log
     }
-  }, [toast]);
+  }, [todayDateString, toast]); // Assuming toast might be used for displaying errors from DB operations if not caught earlier
+
+  // Ref to track if the current fetch operation set the loading state
+  const loadingRef = useRef(false);
 
   useEffect(() => {
-    setLoading(true); 
-    loadTimeBlocks("useEffect initial mount");
+    setLoading(true);
+    loadingRef.current = true; // Indicate that this effect initiated loading
+    fetchTimeBlocks();
     const timerId = setInterval(() => {
       setCurrentTime(new Date());
     }, 60000);
 
     const handleExternalTimelineUpdate = () => {
-        console.log("timelineShouldUpdate event received, preparing to call loadTimeBlocks.");
-        setLoading(true); 
-        loadTimeBlocks("useEffect timelineShouldUpdate event");
+      console.log("timelineShouldUpdate event received, preparing to call fetchTimeBlocks.");
+      setLoading(true);
+      loadingRef.current = true; // Indicate that this handler initiated loading
+      fetchTimeBlocks();
     };
     window.addEventListener('timelineShouldUpdate', handleExternalTimelineUpdate);
 
@@ -582,7 +389,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       clearInterval(timerId);
       window.removeEventListener('timelineShouldUpdate', handleExternalTimelineUpdate);
     };
-  }, [loadTimeBlocks]); 
+  }, [fetchTimeBlocks]); // fetchTimeBlocks is stable due to useCallback
 
   const getIconForType = (type: UITimeBlock['type']): ReactNode => {
     switch (type) {
@@ -615,7 +422,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           title: "删除成功",
           description: `时间块 "${blockTitle}" 已被移除。它可能会在明日根据固定规则重新生成（如果适用）。`,
         });
-        await loadTimeBlocks("delete_block"); 
+        await fetchTimeBlocks(); 
       } catch (err) {
         console.error("Failed to delete time block:", err);
         toast({
@@ -632,7 +439,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const handleOpenAddModal = () => {
     const now = new Date();
     const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
-    setModalFormData({
+    setFormData({
       title: '',
       type: 'task',
       startTime: formatDateToDateTimeLocal(now),
@@ -644,7 +451,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   };
 
   const handleOpenEditModal = (block: UITimeBlock) => {
-    setModalFormData({
+    setFormData({
       title: block.title,
       type: block.type,
       startTime: formatDateToDateTimeLocal(new Date(block.startTime)),
@@ -661,15 +468,15 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
   const handleModalFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | TimeBlockTypeOptionValue, fieldName?: keyof ModalFormData) => {
     if (typeof e === 'string' && fieldName === 'type') {
-        setModalFormData(prev => ({ ...prev, type: e as TimeBlockTypeOptionValue }));
+        setFormData(prev => ({ ...prev, type: e as TimeBlockTypeOptionValue }));
     } else if (typeof e !== 'string') {
         const { name, value } = e.target as HTMLInputElement;
-         setModalFormData(prev => ({ ...prev, [name]: value }));
+         setFormData(prev => ({ ...prev, [name]: value }));
     }
   };
   
   const handleModalSave = async () => {
-    const { title, type, startTime: startTimeStr, endTime: endTimeStr, taskId } = modalFormData;
+    const { title, type, startTime: startTimeStr, endTime: endTimeStr, taskId } = formData;
 
     if (!title.trim()) {
       toast({ title: "验证错误", description: "标题不能为空。", variant: "destructive" });
@@ -751,7 +558,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         await addDB(ObjectStores.TIME_BLOCKS, newBlockPayload);
         toast({ title: "创建成功", description: `时间块 "${title}" 已添加到时间轴。` });
       }
-      await loadTimeBlocks("modal_save");
+      await fetchTimeBlocks();
       handleModalClose();
     } catch (err) {
       console.error("Failed to save time block:", err);
@@ -805,7 +612,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         <CardContent className="pb-2 flex-grow flex flex-col justify-center items-center min-h-[200px] text-red-500">
           <AlertCircle className="h-8 w-8 mb-2" />
           <p>{error}</p>
-          <Button variant="outline" size="sm" onClick={() => {setLoading(true); loadTimeBlocks("error_retry_button");}} className="mt-4">
+          <Button variant="outline" size="sm" onClick={() => {setLoading(true); fetchTimeBlocks();}} className="mt-4">
             重试
           </Button>
         </CardContent>
@@ -840,24 +647,20 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
             <p className="text-sm text-muted-foreground">尝试从任务列表添加，或直接在此处创建时间块。</p>
           </div>
         ) : (
-          <DndContext sensors={dndSensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className="relative pt-2">
-              <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-muted rounded-full" style={{ height: 'calc(100% - 1rem)' }} ></div> {/* Adjust height if needed */}
-              {timeBlocks.map((block) => (
-                <DraggableTimelineBlock
-                  key={block.id}
-                  block={block}
-                  activeDndId={activeDndId}
-                  onPomodoroClick={handleStartPomodoroForBlock}
-                  handleOpenEditModal={handleOpenEditModal}
-                  handleDeleteBlock={handleDeleteBlock}
-                  getIconForType={getIconForType}
-                  getDisplayType={getDisplayType}
-                  currentTime={currentTime}
-                />
-              ))}
-            </div>
-          </DndContext>
+          <div className="space-y-0">
+            {timeBlocks.map((block) => (
+              <TimelineBlockItemContent
+                key={block.id}
+                block={block}
+                onPomodoroClick={handleStartPomodoroForBlock}
+                handleOpenEditModal={handleOpenEditModal}
+                handleDeleteBlock={handleDeleteBlock}
+                getIconForType={getIconForType}
+                getDisplayType={getDisplayType}
+                currentTime={currentTime}
+              />
+            ))}
+          </div>
         )}
       </CardContent>
       <CardFooter className="pt-2 border-t sticky bottom-0 bg-card">
@@ -880,7 +683,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
               <Input
                 id="title"
                 name="title"
-                value={modalFormData.title}
+                value={formData.title}
                 onChange={handleModalFormChange}
                 className="col-span-3"
                 placeholder="例如：团队会议"
@@ -891,7 +694,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
               <Label htmlFor="type" className="text-right">类型</Label>
               <Select 
                 name="type"
-                value={modalFormData.type}
+                value={formData.type}
                 onValueChange={(value) => handleModalFormChange(value as TimeBlockTypeOptionValue, 'type')}
                 disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break')}
               >
@@ -913,10 +716,10 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 id="startTime"
                 name="startTime"
                 type="datetime-local"
-                value={modalFormData.startTime}
+                value={formData.startTime}
                 onChange={handleModalFormChange}
                 className="col-span-3"
-                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && modalFormData.type === 'break')}
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && formData.type === 'break')}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
@@ -925,10 +728,10 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 id="endTime"
                 name="endTime"
                 type="datetime-local"
-                value={modalFormData.endTime}
+                value={formData.endTime}
                 onChange={handleModalFormChange}
                 className="col-span-3"
-                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && modalFormData.type === 'break')}
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && formData.type === 'break')}
               />
             </div>
           </div>

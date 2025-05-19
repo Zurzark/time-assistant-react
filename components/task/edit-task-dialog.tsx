@@ -14,11 +14,11 @@ import { CalendarIcon } from "@radix-ui/react-icons"; // Or from lucide-react if
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Project as DBProjectType, Task as DBTask } from "@/lib/db";
-import { Task as TaskUtilsType, TaskPriority as TaskUtilsPriorityType } from "@/lib/task-utils";
+import { Task as TaskUtilsType, TaskPriority as TaskUtilsPriorityType, TaskCategory as UtilTaskCategory } from "@/lib/task-utils";
 import { NO_PROJECT_VALUE } from "@/lib/task-utils"; // Added imports
 
 // Import the new TaskFormFields and its data type
-import { TaskFormFields, TaskFormData, UIPriority } from "./TaskFormFields"; // Assuming UIPriority is also exported or defined locally
+import { TaskFormFields, TaskFormData, UIPriority, RecurrenceFrequency, RecurrenceEndsType, TaskCategory } from "./TaskFormFields"; // Added TaskCategory and recurrence types
 
 // priorityMapFromDB might be needed if displaying priority text differently than stored value
 // For now, assuming priority prop is already in display format.
@@ -64,9 +64,6 @@ export function EditTaskDialog({
   onCreateNewProject
 }: EditTaskDialogProps) {
 
-  // The form state is now managed by TaskFormFields.
-  // We only need to prepare initialData for it and handle the save callback.
-
   const [formInitialData, setFormInitialData] = useState<Partial<TaskFormData> | undefined>(undefined);
 
   useEffect(() => {
@@ -74,15 +71,27 @@ export function EditTaskDialog({
       setFormInitialData({
         title: task.title || "",
         description: task.description || "",
-        priority: mapTaskUtilsPriorityToUiPriority(task.priority), // Use mapping function
-        dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+        priority: mapTaskUtilsPriorityToUiPriority(task.priority), 
+        
+        category: task.category || "next_action", 
+        plannedDate: task.plannedDate ? new Date(task.plannedDate) : undefined,
+        dueDate: task.dueDate ? new Date(task.dueDate) : undefined, 
+        estimatedDurationHours: task.estimatedDurationHours || 0,
+        
         projectId: task.projectId,
         tags: task.tags || [],
         isFrog: task.isFrog || false,
-        estimatedPomodoros: task.estimatedPomodoros || 0,
+        
+        isRecurring: task.isRecurring || false,
+        recurrenceRule: task.recurrenceRule, 
+        recurrenceEndDate: task.recurrenceEndDate ? new Date(task.recurrenceEndDate) : undefined,
+        recurrenceCount: task.recurrenceCount,
+        // Default recurrenceFrequency and recurrenceEndsType for the form, TaskFormFields will handle these
+        // based on isRecurring and other recurrence fields if these are undefined.
+        recurrenceFrequency: undefined, 
+        recurrenceEndsType: undefined,  
       });
     } else {
-      // Should not happen if dialog is for editing an existing task
       setFormInitialData(undefined); 
     }
   }, [task]);
@@ -97,11 +106,22 @@ export function EditTaskDialog({
       title: formData.title,
       description: formData.description || "", 
       priority: mapUiPriorityToTaskUtilsPriority(formData.priority), 
-      dueDate: formData.dueDate, 
-      projectId: typeof formData.projectId === 'string' && formData.projectId !== NO_PROJECT_VALUE ? parseInt(formData.projectId) : (typeof formData.projectId === 'number' ? formData.projectId : undefined),
+      
+      category: formData.category as UtilTaskCategory, 
+      plannedDate: formData.plannedDate, 
+      dueDate: formData.dueDate, // Already correctly set to undefined by TaskFormFields if recurring
+      estimatedDurationHours: formData.estimatedDurationHours || 0,
+
+      projectId: typeof formData.projectId === 'string' && formData.projectId !== NO_PROJECT_VALUE 
+        ? parseInt(formData.projectId) 
+        : (typeof formData.projectId === 'number' ? formData.projectId : undefined),
       tags: formData.tags,
       isFrog: formData.isFrog,
-      estimatedPomodoros: formData.estimatedPomodoros || 0,
+      
+      isRecurring: formData.isRecurring, 
+      recurrenceRule: formData.recurrenceRule, 
+      recurrenceEndDate: formData.isRecurring && formData.recurrenceEndsType === 'on_date' ? formData.recurrenceEndDate : undefined,
+      recurrenceCount: formData.isRecurring && formData.recurrenceEndsType === 'after_occurrences' ? formData.recurrenceCount : undefined,
     };
 
     onSave(updatedTaskData);
@@ -119,10 +139,9 @@ export function EditTaskDialog({
           <DialogTitle>编辑任务: {task.title}</DialogTitle>
         </DialogHeader>
         
-        {/* Content area now uses TaskFormFields */} 
         {formInitialData && (
           <TaskFormFields
-            key={task.id || 'new-task-edit'} // Ensure key is always present
+            key={task.id || 'new-task-edit'} 
             initialData={formInitialData}
             availableProjects={availableProjects}
             onSave={handleFormSave} 
@@ -130,15 +149,9 @@ export function EditTaskDialog({
             onCreateNewProjectInForm={onCreateNewProject} 
             submitButtonText="保存更改"
             showCancelButton={true} 
+            // pomodoroDurationMinutes prop can be passed from a global setting if needed
           />
         )}
-        {/* DialogFooter might be redundant if TaskFormFields handles its own buttons within its layout */}
-        {/* If TaskFormFields includes its own footer with buttons, remove DialogFooter below */}
-        {/* For now, assuming TaskFormFields does NOT have its own DialogFooter and uses the one from here */}
-        {/* The TaskFormFields component was designed with its own footer buttons in mind though.*/}
-        {/* Let's verify if TaskFormFields's internal buttons are sufficient. Yes, it has its own.*/}
-        {/* So, we don't need a separate DialogFooter here if TaskFormFields renders the buttons.*/}
-
       </DialogContent>
     </Dialog>
   );
