@@ -1,7 +1,7 @@
 // IndexedDB 数据库实现
 // 定义数据库名称和版本号
 const DB_NAME = 'FocusPilotDB';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 // 定义对象存储名称
 export enum ObjectStores {
@@ -18,6 +18,7 @@ export enum ObjectStores {
   MILESTONES = 'milestones',
   TIME_BLOCKS = 'timeBlocks',
   FIXED_BREAK_RULES = 'fixedBreakRules',
+  ACTIVITY_CATEGORIES = 'activityCategories',
 }
 
 // 定义打开数据库的接口
@@ -229,16 +230,8 @@ export const openDB = (): Promise<IDBResult> => {
           }
         }
 
-        // 版本 4: 添加 Milestones 对象存储并调整 Goals
+        // 版本 4: 添加 Milestones 对象存储
         if (oldVersion < 4) {
-          // 调整 Goals 存储 (如果需要显式移除旧的 milestones 字段的残留数据, 会更复杂)
-          // 目前的策略是应用层不再使用 Goal.milestones 字段
-          if (db.objectStoreNames.contains(ObjectStores.GOALS)) {
-            // If 'milestones' was an index or part of the structure that needs changing beyond just the interface,
-            // it would be handled here. Since it was just a field in the object, new code ignoring it is sufficient.
-            console.log('Goals store re-evaluated for version 4: No direct milestones field.');
-          }
-
           // 创建 Milestones 存储
           if (!db.objectStoreNames.contains(ObjectStores.MILESTONES)) {
             const milestoneStore = db.createObjectStore(ObjectStores.MILESTONES, {
@@ -275,6 +268,47 @@ export const openDB = (): Promise<IDBResult> => {
             fixedBreakRuleStore.createIndex('byIsEnabled', 'isEnabled', { unique: false });
             console.log('创建 FixedBreakRules 存储及其索引');
           }
+        }
+
+        // 版本 7: 调整 TIME_BLOCKS, 新增 ACTIVITY_CATEGORIES, 调整 TASKS
+        if (oldVersion < 7) {
+          console.log(`数据库从版本 ${oldVersion} 升级到版本 7: 调整 TIME_BLOCKS, 新增 ACTIVITY_CATEGORIES`);
+          const transaction = (event.target as IDBOpenDBRequest).transaction!; // Get transaction from event
+
+          // 1. 调整 TIME_BLOCKS 对象存储
+          if (db.objectStoreNames.contains(ObjectStores.TIME_BLOCKS)) {
+            const timeBlockStore = transaction.objectStore(ObjectStores.TIME_BLOCKS);
+
+            // 新增索引
+            if (!timeBlockStore.indexNames.contains('byActivityCategory')) {
+              timeBlockStore.createIndex('byActivityCategory', 'activityCategoryId', { unique: false });
+              console.log('为 TIME_BLOCKS 添加 byActivityCategory 索引');
+            }
+            if (!timeBlockStore.indexNames.contains('byIsLogged')) {
+              timeBlockStore.createIndex('byIsLogged', 'isLogged', { unique: false });
+              console.log('为 TIME_BLOCKS 添加 byIsLogged 索引');
+            }
+            console.log('TIME_BLOCKS 存储结构已按版本 7 要求评估和调整索引。');
+          } else {
+            console.warn('TIME_BLOCKS store 不存在，无法在升级到 v7 时调整。它应该在 v5 创建。');
+          }
+
+          // 2. 新增 ACTIVITY_CATEGORIES 对象存储
+          if (!db.objectStoreNames.contains(ObjectStores.ACTIVITY_CATEGORIES)) {
+            const activityCategoryStore = db.createObjectStore(ObjectStores.ACTIVITY_CATEGORIES, {
+              keyPath: 'id',
+              autoIncrement: true, 
+            });
+            activityCategoryStore.createIndex('name', 'name', { unique: true });
+            activityCategoryStore.createIndex('byUserId', 'userId', { unique: false }); 
+            console.log('创建 ACTIVITY_CATEGORIES 存储及其索引');
+          }
+
+          // 3. (可选) 调整 TASKS 对象存储
+          // 对于 TASKS，新增 defaultActivityCategoryId 字段。
+          // IndexedDB 是 schemaless 的，所以不需要在 onupgradeneeded 中显式添加列。
+          // 只需要更新 Task 接口，并在应用代码中写入时包含这个字段。
+          console.log('TASKS 存储结构已按版本 7 要求评估（defaultActivityCategoryId 为可选字段，接口层面处理）。');
         }
       };
     } catch (error) {
@@ -636,6 +670,7 @@ export interface Task {
   estimatedDurationHours?: number;
   recurrenceEndDate?: Date;
   recurrenceCount?: number;
+  defaultActivityCategoryId?: number;
 }
 
 export interface Category {
@@ -733,9 +768,14 @@ export interface TimeBlock {
   id?: number; // 主键，自增
   taskId?: number | string; // 关联的任务ID (来自 'tasks' 表), 可选
   title: string; // 时间块的标题
-  type: 'task' | 'meeting' | 'break' | 'personal' | 'plan'; // 时间块的类别/类型
-  startTime: Date; // 开始时间 (包含日期和时间)
-  endTime: Date; // 结束时间 (包含日期和时间)
+  sourceType: string; // 新增：标识时间块的来源，例如：'fixed_break', 'task_plan', 'manual_entry', 'pomodoro_log'
+  activityCategoryId?: number; // 新增：关联到 ACTIVITY_CATEGORIES (数字ID)
+  startTime: Date; // 预定开始时间 (包含日期和时间)
+  endTime: Date; // 预定结束时间 (包含日期和时间)
+  actualStartTime?: Date; // 新增：实际开始时间
+  actualEndTime?: Date; // 新增：实际结束时间
+  isLogged: 0 | 1; // 新增：标记是否已记录为日志 (默认为0, 在创建时处理)
+  notes?: string; // 新增：备注
   date: string; // YYYY-MM-DD格式，用于快速按天查询
   createdAt: Date; // 创建时间
   updatedAt: Date; // 最后更新时间
@@ -794,6 +834,18 @@ export interface FixedBreakRule {
   endTime: string; // HH:MM格式, 例如 '13:00'
   daysOfWeek: string[]; // 例如 ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
   isEnabled: boolean; // 此规则当前是否启用, 默认为 true
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// 新增 ActivityCategory 接口
+export interface ActivityCategory {
+  id?: number; // 主键，自增
+  name: string; // 必须唯一
+  color?: string; // 十六进制颜色代码
+  icon?: string; // 图标名称或SVG
+  isSystemCategory: 0 | 1; // 默认为0 (false)
+  userId?: number; // 可选，关联用户 (数字ID)
   createdAt: Date;
   updatedAt: Date;
 }

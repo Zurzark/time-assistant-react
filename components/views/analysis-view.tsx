@@ -1,3 +1,7 @@
+/**
+ * @file components/views/analysis-view.tsx
+ * @description 该文件定义了回顾与分析视图组件，用于展示用户的时间使用情况、任务完成率、专注效率等数据，并提供 AI 分析与洞察。
+ */
 "use client"
 
 import { useState } from "react"
@@ -177,7 +181,6 @@ export function AnalysisView() {
                       strokeWidth="20"
                       strokeDasharray="251.2"
                       strokeDashoffset="213.52"
-                      strokeDashoffset="188.4"
                       transform="rotate(-90 50 50)"
                     />
                     <circle
@@ -189,7 +192,6 @@ export function AnalysisView() {
                       strokeWidth="20"
                       strokeDasharray="251.2"
                       strokeDashoffset="238.64"
-                      strokeDashoffset="213.52"
                       transform="rotate(-180 50 50)"
                     />
                     <circle
@@ -201,7 +203,6 @@ export function AnalysisView() {
                       strokeWidth="20"
                       strokeDasharray="251.2"
                       strokeDashoffset="251.2"
-                      strokeDashoffset="238.64"
                       transform="rotate(-270 50 50)"
                     />
                   </svg>

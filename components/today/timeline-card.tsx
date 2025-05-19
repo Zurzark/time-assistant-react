@@ -14,7 +14,8 @@ import {
   User,
   Trash2,
   Edit3,
-  PlusCircle
+  PlusCircle,
+  Timer
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -39,12 +40,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { type TimeBlock as DBTimeBlock, ObjectStores, getByIndex as getDBByIndex, remove as removeDB, add as addDB, update as updateDB, get as getDBItem, FixedBreakRule, getAll as getAllDB } from "@/lib/db"
+import { type TimeBlock as DBTimeBlock, ObjectStores, getByIndex as getDBByIndex, remove as removeDB, add as addDB, update as updateDB, get as getDBItem, FixedBreakRule, getAll as getAllDB, ActivityCategory } from "@/lib/db"
 import { useToast } from "@/components/ui/use-toast"
 
-interface UITimeBlock extends DBTimeBlock {
+interface UITimeBlock extends Omit<DBTimeBlock, 'isLogged' | 'activityCategoryId'> {
   id: number;
   isCurrent?: boolean;
+  isLogged: boolean;
+  activityCategoryId?: number;
 }
 
 const getTodayDateString = () => {
@@ -65,21 +68,22 @@ const formatDateToDateTimeLocal = (date: Date): string => {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
-const TIME_BLOCK_TYPES = [
-  { value: 'task', label: '工作' },
-  { value: 'meeting', label: '会议' },
-  { value: 'break', label: '休息' },
-  { value: 'personal', label: '个人' },
-  { value: 'plan', label: '计划' },
+const SOURCE_TYPE_OPTIONS = [
+  { value: 'manual_entry', label: '手动创建' },
+  { value: 'task_plan', label: '任务计划' },
+  { value: 'fixed_break', label: '固定休息' },
+  { value: 'pomodoro_log', label: '番茄记录' },
 ] as const;
 
-type TimeBlockTypeOptionValue = typeof TIME_BLOCK_TYPES[number]['value'];
+type SourceTypeOptionValue = typeof SOURCE_TYPE_OPTIONS[number]['value'];
 
 interface ModalFormData {
   title: string;
-  type: TimeBlockTypeOptionValue;
+  sourceType: SourceTypeOptionValue;
+  activityCategoryId?: string;
   startTime: string;
   endTime: string;
+  notes?: string;
   taskId?: number | string;
 }
 
@@ -87,15 +91,13 @@ interface TimelineCardProps {
   onPomodoroClick: (taskId: string, taskTitle: string) => void;
 }
 
-
-// Helper components for DND - Now simplified
 interface TimelineBlockItemContentProps {
   block: UITimeBlock;
   onPomodoroClick: (taskId: string, taskTitle: string) => void;
   handleOpenEditModal: (block: UITimeBlock) => void;
   handleDeleteBlock: (blockId: number, blockTitle: string) => void;
-  getIconForType: (type: UITimeBlock['type']) => ReactNode;
-  getDisplayType: (type: UITimeBlock['type']) => string;
+  getIconForSourceType: (sourceType: UITimeBlock['sourceType'], fixedBreakId?: string) => ReactNode;
+  getDisplaySourceType: (sourceType: UITimeBlock['sourceType'], fixedBreakId?: string, activityCategoryName?: string) => string;
   currentTime: Date;
 }
 
@@ -104,12 +106,13 @@ const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
   onPomodoroClick,
   handleOpenEditModal,
   handleDeleteBlock,
-  getIconForType,
-  getDisplayType,
+  getIconForSourceType,
+  getDisplaySourceType,
   currentTime,
 }) => {
-  const isCurrent = currentTime >= block.startTime && currentTime < block.endTime;
-  const typeDisplay = getDisplayType(block.type);
+  const isCurrent = new Date(currentTime) >= new Date(block.startTime) && new Date(currentTime) < new Date(block.endTime);
+  const typeDisplay = getDisplaySourceType(block.sourceType, block.fixedBreakId, block.title);
+  const icon = getIconForSourceType(block.sourceType, block.fixedBreakId);
 
   return (
     <div
@@ -121,16 +124,20 @@ const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
             "absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center shadow",
             isCurrent
               ? "bg-blue-100 text-blue-600 ring-2 ring-blue-500 ring-offset-1"
-              : block.type === "break" 
-                ? (block.fixedBreakId ? "bg-teal-100 text-teal-700" : "bg-green-100 text-green-600")
+              : block.sourceType === "fixed_break"
+                ? "bg-teal-100 text-teal-700"
+                : block.sourceType === "pomodoro_log"
+                ? "bg-yellow-100 text-yellow-700"
+                : block.activityCategoryId && block.sourceType === 'manual_entry'
+                ? "bg-indigo-100 text-indigo-600"
                 : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
           )}
-          title={isCurrent ? "进行中" : (block.fixedBreakId ? `固定${typeDisplay}` : typeDisplay)}
+          title={isCurrent ? "进行中" : typeDisplay}
         >
           {isCurrent ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            getIconForType(block.type)
+            icon
           )}
         </div>
         <div
@@ -138,8 +145,12 @@ const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
             "rounded-lg border p-3 shadow-sm transition-all hover:shadow-md",
             isCurrent
               ? "border-blue-300 bg-blue-50 dark:bg-blue-950 dark:border-blue-700"
-              : block.type === "break"
-                ? (block.fixedBreakId ? "border-teal-200 bg-teal-50 dark:bg-teal-950 dark:border-teal-700" : "border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-700")
+              : block.sourceType === "fixed_break"
+                ? "border-teal-200 bg-teal-50 dark:bg-teal-950 dark:border-teal-700"
+                : block.sourceType === "pomodoro_log"
+                ? "border-yellow-200 bg-yellow-50 dark:bg-yellow-950 dark:border-yellow-700"
+                : block.activityCategoryId && block.sourceType === 'manual_entry'
+                ? "border-indigo-200 bg-indigo-50 dark:bg-indigo-950 dark:border-indigo-700"
                 : "border-gray-200 bg-white dark:bg-gray-800 dark:border-gray-700",
           )}
         >
@@ -152,16 +163,14 @@ const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
               variant="outline"
               className={cn(
                 "text-xs font-medium",
-                block.type === "task" ? "border-blue-400 text-blue-600 bg-blue-50 dark:border-blue-600 dark:text-blue-300 dark:bg-blue-900/50"
-                : block.type === "meeting" ? "border-purple-400 text-purple-600 bg-purple-50 dark:border-purple-600 dark:text-purple-300 dark:bg-purple-900/50"
-                : block.type === "break"
-                  ? (block.fixedBreakId ? "border-teal-400 text-teal-600 bg-teal-50 dark:border-teal-600 dark:text-teal-300 dark:bg-teal-900/50" : "border-green-400 text-green-600 bg-green-50 dark:border-green-600 dark:text-green-300 dark:bg-green-900/50")
-                : block.type === "plan" ? "border-amber-400 text-amber-600 bg-amber-50 dark:border-amber-600 dark:text-amber-300 dark:bg-amber-900/50"
-                : block.type === "personal" ? "border-pink-400 text-pink-600 bg-pink-50 dark:border-pink-600 dark:text-pink-300 dark:bg-pink-900/50"
+                block.sourceType === "task_plan" ? "border-blue-400 text-blue-600 bg-blue-50 dark:border-blue-600 dark:text-blue-300 dark:bg-blue-900/50"
+                : block.sourceType === "fixed_break" ? "border-teal-400 text-teal-600 bg-teal-50 dark:border-teal-600 dark:text-teal-300 dark:bg-teal-900/50"
+                : block.sourceType === "pomodoro_log" ? "border-yellow-400 text-yellow-600 bg-yellow-50 dark:border-yellow-600 dark:text-yellow-300 dark:bg-yellow-900/50"
+                : block.sourceType === "manual_entry" && block.activityCategoryId ? "border-indigo-400 text-indigo-600 bg-indigo-50 dark:border-indigo-600 dark:text-indigo-300 dark:bg-indigo-900/50"
                 : "border-gray-400 text-gray-600 bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:bg-gray-900/50",
               )}
             >
-              {block.fixedBreakId ? `固定${typeDisplay}` : typeDisplay}
+              {typeDisplay}
             </Badge>
             <div className="flex items-center space-x-1">
               {block.taskId && (
@@ -213,11 +222,14 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const [currentEditingBlock, setCurrentEditingBlock] = useState<UITimeBlock | null>(null);
   const [formData, setFormData] = useState<ModalFormData>({
     title: "",
-    type: "task",
+    sourceType: "manual_entry",
+    activityCategoryId: undefined,
     startTime: "",
     endTime: "",
+    notes: "",
     taskId: undefined,
   });
+  const [activityCategories, setActivityCategories] = useState<ActivityCategory[]>([]);
 
   const isProcessingFixedBreaksRef = useRef(false);
 
@@ -249,6 +261,13 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       const blocksToAdd: Omit<DBTimeBlock, 'id'>[] = [];
       const processedFixedBreakIdsInThisRun = new Set<string>(); 
 
+      try {
+        const categories = await getAllDB<ActivityCategory>(ObjectStores.ACTIVITY_CATEGORIES);
+        setActivityCategories(categories);
+      } catch (catError) {
+        console.error("Failed to load activity categories:", catError);
+      }
+
       for (const rule of activeRulesForToday) {
         if (rule.id === undefined) continue; 
         const fixedBreakIdStr = String(rule.id);
@@ -256,7 +275,9 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         if (processedFixedBreakIdsInThisRun.has(fixedBreakIdStr)) continue; 
 
         const alreadyExistsInInitialLoad = initialExistingBlocks.some(
-          block => block.fixedBreakId === fixedBreakIdStr && block.type === 'break' && block.date === todayDateString
+          block => block.fixedBreakId === fixedBreakIdStr && 
+                   block.sourceType === 'fixed_break' &&
+                   block.date === todayDateString
         );
 
         if (!alreadyExistsInInitialLoad) {
@@ -269,21 +290,23 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           let endTime = new Date(todayDateObj); 
           endTime.setHours(endHour, endMinute, 0, 0);
           
-          if (endTime.getTime() <= startTime.getTime()) { // use getTime for comparison
+          if (endTime.getTime() <= startTime.getTime()) {
               console.warn(`Invalid fixed break rule (end <= start): ${rule.label || rule.id} for ${todayDateString}`);
               continue;
           }
 
           const newFixedBlockPayload: Omit<DBTimeBlock, 'id'> = {
             title: rule.label || "固定休息",
-            type: 'break',
+            sourceType: 'fixed_break',
+            activityCategoryId: undefined,
             startTime: startTime,
             endTime: endTime,
+            isLogged: 0,
+            notes: undefined,
             date: todayDateString,
             fixedBreakId: fixedBreakIdStr,
             createdAt: new Date(),
             updatedAt: new Date(),
-            taskId: undefined,
           };
           blocksToAdd.push(newFixedBlockPayload);
           processedFixedBreakIdsInThisRun.add(fixedBreakIdStr);
@@ -306,7 +329,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
       const filteredAndProcessedBlocks = allTodayDbBlocksFromDB
         .filter(block => {
-          if (block.type === 'break' && block.fixedBreakId) {
+          if (block.fixedBreakId && block.sourceType === 'fixed_break') {
             if (!validRuleIdsFromSettings.has(block.fixedBreakId)) {
               console.warn(`Orphaned fixed break block found (ID: ${block.id}, fixedBreakId: ${block.fixedBreakId}, Title: ${block.title}). Scheduled for removal.`);
               if (block.id !== undefined) {
@@ -320,6 +343,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         .map(block => ({
           ...block,
           id: block.id!,
+          isLogged: block.isLogged === 1,
           startTime: new Date(block.startTime), 
           endTime: new Date(block.endTime)
         } as UITimeBlock))
@@ -329,7 +353,6 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
       if (blocksToRemoveIds.length > 0) {
         console.log("Removing orphaned fixed break blocks from DB:", blocksToRemoveIds);
-        // This runs in background, no await needed here not to block UI updates
         (async () => {
           for (const idToRemove of blocksToRemoveIds) {
             try {
@@ -350,28 +373,22 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     } catch (err: any) {
       console.error("Error in fetchTimeBlocks:", err);
       setError(err.message || "无法加载时间块数据。");
-      setTimeBlocks([]); // Clear blocks on error
+      setTimeBlocks([]);
     } finally {
       isProcessingFixedBreaksRef.current = false;
-      // setLoading(false) is handled by callers after fetchTimeBlocks completes or in their error handling.
-      // However, if a setLoading(true) was initiated by a general refresh/load that calls this directly,
-      // this is a place to ensure loading is false. The current structure has callers manage it.
-      // For safety, and given the previous logic, we ensure it's set to false IF it was true.
-      // This implies `setLoading(true)` should be called before `fetchTimeBlocks` if a loading state is desired.
-      if (loadingRef.current) { // Use a ref to check if the current operation set loading to true
+      if (loadingRef.current) {
          setLoading(false);
-         loadingRef.current = false; // Reset ref
+         loadingRef.current = false;
       }
-      console.log("fetchTimeBlocks finished. Lock released."); // Removed triggeredBy from log
+      console.log("fetchTimeBlocks finished. Lock released.");
     }
-  }, [todayDateString, toast]); // Assuming toast might be used for displaying errors from DB operations if not caught earlier
+  }, [todayDateString, toast]);
 
-  // Ref to track if the current fetch operation set the loading state
   const loadingRef = useRef(false);
 
   useEffect(() => {
     setLoading(true);
-    loadingRef.current = true; // Indicate that this effect initiated loading
+    loadingRef.current = true;
     fetchTimeBlocks();
     const timerId = setInterval(() => {
       setCurrentTime(new Date());
@@ -380,7 +397,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     const handleExternalTimelineUpdate = () => {
       console.log("timelineShouldUpdate event received, preparing to call fetchTimeBlocks.");
       setLoading(true);
-      loadingRef.current = true; // Indicate that this handler initiated loading
+      loadingRef.current = true;
       fetchTimeBlocks();
     };
     window.addEventListener('timelineShouldUpdate', handleExternalTimelineUpdate);
@@ -389,26 +406,32 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       clearInterval(timerId);
       window.removeEventListener('timelineShouldUpdate', handleExternalTimelineUpdate);
     };
-  }, [fetchTimeBlocks]); // fetchTimeBlocks is stable due to useCallback
+  }, [fetchTimeBlocks]);
 
-  const getIconForType = (type: UITimeBlock['type']): ReactNode => {
-    switch (type) {
-      case 'task': return <Activity className="h-4 w-4" />;
-      case 'meeting': return <CalendarIcon className="h-4 w-4" />;
-      case 'break': return <Coffee className="h-4 w-4" />;
-      case 'plan': return <Flag className="h-4 w-4" />;
-      case 'personal': return <User className="h-4 w-4" />;
+  const getIconForSourceType = (sourceType: UITimeBlock['sourceType'], fixedBreakId?: string): ReactNode => {
+    if (fixedBreakId) return <Coffee className="h-4 w-4" />;
+    switch (sourceType) {
+      case 'task_plan': return <Activity className="h-4 w-4" />;
+      case 'manual_entry': return <Edit3 className="h-4 w-4" />;
+      case 'pomodoro_log': return <Timer className="h-4 w-4" />;
       default: return <Activity className="h-4 w-4" />;
     }
   };
   
-  const getDisplayType = (type: UITimeBlock['type']) => {
-    switch (type) {
-      case 'task': return "工作";
-      case 'meeting': return "会议";
-      case 'break': return "休息";
-      case 'plan': return "计划";
-      case 'personal': return "个人";
+  const getDisplaySourceType = (
+    sourceType: UITimeBlock['sourceType'], 
+    fixedBreakId?: string, 
+    activityCategoryName?: string
+  ): string => {
+    if (fixedBreakId) return activityCategoryName ? `固定${activityCategoryName}` : "固定休息";
+    if (sourceType === 'manual_entry' && activityCategoryName && activityCategoryName !== "手动创建") {
+        return activityCategoryName;
+    }
+    switch (sourceType) {
+      case 'task_plan': return "任务计划";
+      case 'manual_entry': return activityCategoryName || "手动创建";
+      case 'fixed_break': return "固定休息";
+      case 'pomodoro_log': return "番茄记录";
       default: return "活动";
     }
   };
@@ -441,9 +464,11 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
     setFormData({
       title: '',
-      type: 'task',
+      sourceType: 'manual_entry',
+      activityCategoryId: undefined,
       startTime: formatDateToDateTimeLocal(now),
       endTime: formatDateToDateTimeLocal(oneHourLater),
+      notes: '',
       taskId: undefined,
     });
     setCurrentEditingBlock(null);
@@ -453,9 +478,11 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const handleOpenEditModal = (block: UITimeBlock) => {
     setFormData({
       title: block.title,
-      type: block.type,
+      sourceType: block.sourceType as SourceTypeOptionValue,
+      activityCategoryId: block.activityCategoryId ? String(block.activityCategoryId) : undefined,
       startTime: formatDateToDateTimeLocal(new Date(block.startTime)),
       endTime: formatDateToDateTimeLocal(new Date(block.endTime)),
+      notes: block.notes || '',
       taskId: block.taskId,
     });
     setCurrentEditingBlock(block);
@@ -466,9 +493,11 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     setIsModalOpen(false);
   };
 
-  const handleModalFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | TimeBlockTypeOptionValue, fieldName?: keyof ModalFormData) => {
-    if (typeof e === 'string' && fieldName === 'type') {
-        setFormData(prev => ({ ...prev, type: e as TimeBlockTypeOptionValue }));
+  const handleModalFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | SourceTypeOptionValue | string, fieldName?: keyof ModalFormData) => {
+    if (typeof e === 'string' && fieldName === 'sourceType') {
+        setFormData(prev => ({ ...prev, sourceType: e as SourceTypeOptionValue }));
+    } else if (typeof e === 'string' && fieldName === 'activityCategoryId') {
+        setFormData(prev => ({ ...prev, activityCategoryId: e }));
     } else if (typeof e !== 'string') {
         const { name, value } = e.target as HTMLInputElement;
          setFormData(prev => ({ ...prev, [name]: value }));
@@ -476,7 +505,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   };
   
   const handleModalSave = async () => {
-    const { title, type, startTime: startTimeStr, endTime: endTimeStr, taskId } = formData;
+    const { title, sourceType, activityCategoryId: activityCategoryIdStr, startTime: startTimeStr, endTime: endTimeStr, notes, taskId } = formData;
 
     if (!title.trim()) {
       toast({ title: "验证错误", description: "标题不能为空。", variant: "destructive" });
@@ -490,7 +519,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         return;
     }
 
-    if (end.getTime() <= start.getTime()) { // use getTime for comparison
+    if (end.getTime() <= start.getTime()) {
       toast({ title: "验证错误", description: "结束时间必须在开始时间之后。", variant: "destructive" });
       return;
     }
@@ -500,13 +529,18 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       if (currentEditingBlock && currentEditingBlock.id) {
         const blockToUpdate: DBTimeBlock = {
           ...currentEditingBlock,
+          id: currentEditingBlock.id,
           title,
-          type,
+          sourceType: sourceType,
+          activityCategoryId: activityCategoryIdStr ? parseInt(activityCategoryIdStr) : undefined,
           startTime: start,
           endTime: end,
+          notes: notes,
+          isLogged: currentEditingBlock.isLogged ? 1 : 0,
           date: start.toISOString().split('T')[0],
           updatedAt: new Date(),
           taskId: taskId,
+          fixedBreakId: currentEditingBlock.fixedBreakId
         };
 
         if (blockToUpdate.fixedBreakId) {
@@ -516,12 +550,11 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
             if (!isNaN(ruleIdNum)) {
               const originalRule = await getDBItem<FixedBreakRule>(ObjectStores.FIXED_BREAK_RULES, ruleIdNum);
               if (originalRule) {
-                // Format DB times to compare with rule times (which are HH:MM strings)
                 const blockStartTimeFormatted = formatTime(blockToUpdate.startTime);
                 const blockEndTimeFormatted = formatTime(blockToUpdate.endTime);
 
                 if (
-                  blockToUpdate.type !== 'break' ||
+                  blockToUpdate.sourceType !== 'fixed_break' ||
                   blockToUpdate.title !== (originalRule.label || "固定休息") || 
                   blockStartTimeFormatted !== originalRule.startTime ||
                   blockEndTimeFormatted !== originalRule.endTime
@@ -550,9 +583,18 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
       } else {
         const newBlockPayload: Omit<DBTimeBlock, 'id'> = {
-          title, type, startTime: start, endTime: end,
+          title, 
+          sourceType: 'manual_entry',
+          activityCategoryId: activityCategoryIdStr ? parseInt(activityCategoryIdStr) : undefined,
+          startTime: start, 
+          endTime: end,
+          isLogged: 0,
+          notes: notes,
+          actualStartTime: undefined,
+          actualEndTime: undefined,
           date: start.toISOString().split('T')[0],
-          createdAt: new Date(), updatedAt: new Date(),
+          createdAt: new Date(), 
+          updatedAt: new Date(),
           taskId: taskId,
         };
         await addDB(ObjectStores.TIME_BLOCKS, newBlockPayload);
@@ -582,8 +624,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     }
   };
 
-  // Initial loading and error states are handled first
-  if (loading && timeBlocks.length === 0 && !error) { // Added !error to ensure error screen shows if error during initial load
+  if (loading && timeBlocks.length === 0 && !error) {
     return (
       <Card className="h-full flex flex-col">
         <CardHeader className="pb-2">
@@ -625,7 +666,6 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     );
   }
 
-  // Main return for when data is available or it's loading more data in background
   return (
     <Card className="h-full flex flex-col relative">
       {loading && timeBlocks.length > 0 && (
@@ -655,8 +695,8 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 onPomodoroClick={handleStartPomodoroForBlock}
                 handleOpenEditModal={handleOpenEditModal}
                 handleDeleteBlock={handleDeleteBlock}
-                getIconForType={getIconForType}
-                getDisplayType={getDisplayType}
+                getIconForSourceType={getIconForSourceType}
+                getDisplaySourceType={getDisplaySourceType}
                 currentTime={currentTime}
               />
             ))}
@@ -687,24 +727,25 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 onChange={handleModalFormChange}
                 className="col-span-3"
                 placeholder="例如：团队会议"
-                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break')}
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.sourceType === 'fixed_break')}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="type" className="text-right">类型</Label>
+              <Label htmlFor="activityCategoryId" className="text-right">分类</Label> 
               <Select 
-                name="type"
-                value={formData.type}
-                onValueChange={(value) => handleModalFormChange(value as TimeBlockTypeOptionValue, 'type')}
-                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break')}
+                name="activityCategoryId"
+                value={formData.activityCategoryId || ""}
+                onValueChange={(value) => handleModalFormChange(value as string, 'activityCategoryId')}
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.sourceType === 'fixed_break')}
               >
                 <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="选择类型" />
+                  <SelectValue placeholder="选择活动分类" />
                 </SelectTrigger>
                 <SelectContent>
-                  {TIME_BLOCK_TYPES.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                  <SelectItem value="">无分类</SelectItem>
+                  {activityCategories.map(cat => (
+                    <SelectItem key={cat.id} value={String(cat.id)}>
+                      {cat.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -719,7 +760,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 value={formData.startTime}
                 onChange={handleModalFormChange}
                 className="col-span-3"
-                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && formData.type === 'break')}
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.sourceType === 'fixed_break')}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
@@ -731,8 +772,19 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                 value={formData.endTime}
                 onChange={handleModalFormChange}
                 className="col-span-3"
-                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.type === 'break' && formData.type === 'break')}
+                disabled={!!(currentEditingBlock?.fixedBreakId && currentEditingBlock.sourceType === 'fixed_break')}
               />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="notes" className="text-right">备注</Label>
+                <Input 
+                    id="notes"
+                    name="notes"
+                    value={formData.notes || ''}
+                    onChange={handleModalFormChange}
+                    className="col-span-3"
+                    placeholder="添加备注 (可选)"
+                 />
             </div>
           </div>
           <DialogFooter>

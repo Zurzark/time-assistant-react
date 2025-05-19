@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,22 +25,28 @@ import {
   Tag, 
   Timer, 
   User,
-  Edit3, // 用于编辑按钮
-  Trash2, // 用于删除按钮
-  PlusCircle, // 用于添加按钮
-  ListChecks, // 用于规则列表图标 (可选)
-  Loader2, // 用于加载状态
-  AlertCircle // 用于错误状态
+  Edit3, 
+  Trash2, 
+  PlusCircle, 
+  ListChecks, 
+  Loader2, 
+  AlertCircle,
+  ClipboardList
+  // Icons specifically for ActivityCategory removed from here, will be in its own component
+  // Coffee, Briefcase, BookOpen, Users as UsersIcon, Smile, Activity as ActivityIcon, Anchor, Award, CheckCircle, XCircle, Info as InfoIcon, LucideIcon,
+  // Settings as SettingsIcon, Trash2 as Trash2Icon, Edit3 as Edit3Icon, PlusCircle as PlusCircleIcon, ListChecks as ListChecksIcon, ClipboardList as ClipboardListIcon
 } from "lucide-react"
 import { TimeField } from "@/components/ui/time-field"
 import { Time } from "@internationalized/date"
 import {
   ObjectStores,
-  FixedBreakRule, // 新的接口
+  FixedBreakRule, 
+  // ActivityCategory, // Will be imported in ActivityCategorySettings
   getAll as getAllDB,
   add as addDB,
   update as updateDB,
   remove as removeDB,
+  // getByIndex, // Will be imported in ActivityCategorySettings if still needed there
 } from "@/lib/db"
 import { useToast } from "@/components/ui/use-toast"
 import {
@@ -50,8 +56,13 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogClose,
+  // DialogClose, // DialogClose might not be needed globally
 } from "@/components/ui/dialog"
+// import { IconPicker, PickableIconName } from '@/components/ui/icon-picker'; // Moved to ActivityCategorySettings
+
+// ActivityCategorySettings component will be imported below
+import { ActivityCategorySettings } from "./settings/activity-category-settings";
+
 
 // 定义标签颜色的类型
 type TagColors = Record<string, string>;
@@ -140,6 +151,8 @@ const displayDaysOfWeek = (days: string[]): string => {
   return sortedDays.map(dayId => ALL_DAYS_OF_WEEK.find(d => d.id === dayId)?.label || dayId).join(", ");
 };
 
+// Icon map and related types/functions moved to ActivityCategorySettings
+
 export function SettingsView() {
   const { theme, setTheme, resolvedTheme } = useTheme()
   const [activeTab, setActiveTab] = useState("account")
@@ -162,15 +175,16 @@ export function SettingsView() {
     家庭: "#f59e0b",
     健康: "#8b5cf6",
   })
-  const { toast } = useToast(); // 获取 toast
+  const { toast } = useToast(); 
 
-  // 新增状态：固定休息时段规则管理
   const [fixedBreakRules, setFixedBreakRules] = useState<FixedBreakRule[]>([]);
   const [loadingFixedBreakRules, setLoadingFixedBreakRules] = useState(true);
   const [fixedBreakRuleError, setFixedBreakRuleError] = useState<string | null>(null);
   const [isFixedBreakRuleModalOpen, setIsFixedBreakRuleModalOpen] = useState(false);
   const [currentEditingFixedBreakRule, setCurrentEditingFixedBreakRule] = useState<FixedBreakRule | null>(null);
   const [fixedBreakRuleSaving, setFixedBreakRuleSaving] = useState(false);
+
+  // Activity Category states moved to ActivityCategorySettings.tsx
 
   const initialFixedBreakRuleFormData: FixedBreakRuleFormData = {
     label: "",
@@ -191,6 +205,8 @@ export function SettingsView() {
     { name: "粉色", value: "#ec4899" },
     { name: "灰色", value: "#6b7280" }
   ]
+
+  // predefinedCategoryColors moved to ActivityCategorySettings
 
   // 初始化从本地存储加载主题颜色
   useEffect(() => {
@@ -277,7 +293,11 @@ export function SettingsView() {
     if (activeTab === "worktime") {
       loadFixedBreakRules();
     }
+    // Activity Categories loading useEffect is moved to ActivityCategorySettings
   }, [activeTab, loadFixedBreakRules]);
+
+
+  // loadActivityCategories and its useEffect moved to ActivityCategorySettings
 
   // Placeholder functions for actions - to be implemented next
   const handleOpenAddFixedBreakRuleModal = () => {
@@ -435,6 +455,10 @@ export function SettingsView() {
     }
   };
 
+  // --- Activity Category Modal and CRUD Functions moved to ActivityCategorySettings.tsx ---
+  // handleOpenAddActivityCategoryModal, handleOpenEditActivityCategoryModal, handleCloseActivityCategoryModal,
+  // handleSaveActivityCategory, handleDeleteActivityCategory, handleConfirmRecategorizeAndDelete, handleSelectIcon
+
   return (
     <div className="container py-6">
       <div className="flex flex-col space-y-2 mb-6">
@@ -513,6 +537,14 @@ export function SettingsView() {
                   标签管理
                 </Button>
                 <Button
+                  variant={activeTab === "activityCategories" ? "secondary" : "ghost"}
+                  className="w-full justify-start"
+                  onClick={() => setActiveTab("activityCategories")}
+                >
+                  <ClipboardList className="h-4 w-4 mr-2" />
+                  活动分类管理
+                </Button>
+                <Button
                   variant={activeTab === "integrations" ? "secondary" : "ghost"}
                   className="w-full justify-start"
                   onClick={() => setActiveTab("integrations")}
@@ -538,6 +570,7 @@ export function SettingsView() {
                 {activeTab === "ai" && "AI助手配置"}
                 {activeTab === "data" && "数据管理"}
                 {activeTab === "tags" && "标签管理"}
+                {activeTab === "activityCategories" && "活动分类管理"}
                 {activeTab === "integrations" && "外部集成"}
               </CardTitle>
               <CardDescription>
@@ -549,6 +582,7 @@ export function SettingsView() {
                 {activeTab === "ai" && "配置AI助手的行为和权限"}
                 {activeTab === "data" && "导入、导出和管理您的数据"}
                 {activeTab === "tags" && "创建和管理任务标签"}
+                {activeTab === "activityCategories" && "创建和管理您的时间日志和时间块的活动分类"}
                 {activeTab === "integrations" && "连接到第三方服务和应用"}
               </CardDescription>
             </CardHeader>
@@ -1253,6 +1287,11 @@ export function SettingsView() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* Activity Category Management - Replaced with new component */}
+              {activeTab === "activityCategories" && (
+                <ActivityCategorySettings toast={toast} />
               )}
 
               {/* Integrations */}
