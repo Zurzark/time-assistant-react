@@ -1,10 +1,21 @@
 "use client";
 
-import { AlertCircle, ArrowUpLeft, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowUpLeft, Loader2, Trash2, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Task as DBTaskType } from "@/lib/db"; // Assuming DBTaskType is the correct type for deleted tasks
 import { cn } from "@/lib/utils"; // If cn is used for styling
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 // priorityMapFromDB might be needed if displaying priority text differently than stored value
 // It should be passed as a prop if needed.
@@ -24,6 +35,8 @@ interface TrashViewProps {
   onRestoreTask: (taskId: number) => void;
   onPermanentlyDeleteTask: (taskId: number) => void; // This should trigger the confirmation in parent
   onLoadRetry: () => void;
+  onEmptyTrash: () => Promise<void>;
+  isEmplyingTrash: boolean;
   // priorityMapFromDB: Record<string, string>; // Pass this if used from parent
 }
 
@@ -34,6 +47,8 @@ export function TrashView({
   onRestoreTask,
   onPermanentlyDeleteTask,
   onLoadRetry,
+  onEmptyTrash,
+  isEmplyingTrash,
   // priorityMapFromDB // Destructure if passed as prop
 }: TrashViewProps) {
   if (loadingTrash) {
@@ -68,52 +83,91 @@ export function TrashView({
 
   return (
     <div className="space-y-4">
-      {deletedTasks.map((task) => (
-        <div 
-          key={task.id} 
-          className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
-        >
-          <div className="flex-1 space-y-1">
-            <h3 className="text-base font-medium text-muted-foreground line-through">
-              {task.isFrog ? "🐸 " : ""}{task.title}
-            </h3>
-            {task.deletedAt && (
-              <p className="text-xs text-muted-foreground">
-                删除于: {format(new Date(task.deletedAt), "yyyy-MM-dd HH:mm")}
-              </p>
-            )}
-            {/* Optionally display original priority/dueDate, dimmed */}
-            {task.priority && (
-              <span className="text-xs text-muted-foreground/70 mr-2">
-                原优先级: {priorityMapFromDB[task.priority as string] || task.priority}
-              </span>
-            )}
-            {task.dueDate && (
-              <span className="text-xs text-muted-foreground/70">
-                原截止日期: {format(new Date(task.dueDate), "yyyy-MM-dd")}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button 
-              variant="outline"
-              size="sm"
-              onClick={() => onRestoreTask(task.id!)}
-            >
-              <ArrowUpLeft className="h-4 w-4 mr-1.5" />
-              恢复
+      <div className="flex justify-end mb-4">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" disabled={isEmplyingTrash || deletedTasks.length === 0}>
+              {isEmplyingTrash ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-2 h-4 w-4" />
+              )}
+              清空回收站
             </Button>
-            <Button 
-              variant="destructive"
-              size="sm" 
-              onClick={() => onPermanentlyDeleteTask(task.id!)}
-            >
-              <Trash2 className="h-4 w-4 mr-1.5" />
-              永久删除
-            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center">
+                <AlertTriangle className="h-6 w-6 text-destructive mr-2" />
+                确认清空回收站？
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                此操作将永久删除回收站中的所有任务，且无法恢复。您确定要继续吗？
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  await onEmptyTrash();
+                }}
+                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              >
+                确认清空
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+
+      <div className="space-y-3">
+        {deletedTasks.map((task) => (
+          <div 
+            key={task.id} 
+            className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <div className="flex-1 space-y-1">
+              <h3 className="text-base font-medium text-muted-foreground line-through">
+                {task.isFrog ? "🐸 " : ""}{task.title}
+              </h3>
+              {task.deletedAt && (
+                <p className="text-xs text-muted-foreground">
+                  删除于: {format(new Date(task.deletedAt), "yyyy-MM-dd HH:mm")}
+                </p>
+              )}
+              {/* Optionally display original priority/dueDate, dimmed */}
+              {task.priority && (
+                <span className="text-xs text-muted-foreground/70 mr-2">
+                  原优先级: {priorityMapFromDB[task.priority as string] || task.priority}
+                </span>
+              )}
+              {task.dueDate && (
+                <span className="text-xs text-muted-foreground/70">
+                  原截止日期: {format(new Date(task.dueDate), "yyyy-MM-dd")}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button 
+                variant="outline"
+                size="sm"
+                onClick={() => onRestoreTask(task.id!)}
+              >
+                <ArrowUpLeft className="h-4 w-4 mr-1.5" />
+                恢复
+              </Button>
+              <Button 
+                variant="destructive"
+                size="sm" 
+                onClick={() => onPermanentlyDeleteTask(task.id!)}
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" />
+                永久删除
+              </Button>
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 } 

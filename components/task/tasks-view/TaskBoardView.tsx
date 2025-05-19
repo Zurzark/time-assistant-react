@@ -1,9 +1,9 @@
-// 此组件负责渲染任务的"看板视图"（四象限视图），
+// 此组件负责渲染任务的"看板视图"（艾森豪威尔四象限矩阵），
 // 将任务按优先级分发到四个象限列中，每个列内部渲染对应的 TaskItem。
 import { Task, TaskPriority } from "@/lib/task-utils";
 import { TaskItem } from "./TaskItem";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle } from "lucide-react"; // For quadrant titles
+import { AlertCircle, AlertTriangle, Clock, XCircle } from "lucide-react"; // 为不同象限提供不同图标
 
 interface TaskBoardViewProps {
     tasks: Task[]; // Already sorted, but will be filtered by priority here
@@ -19,31 +19,44 @@ interface TaskBoardViewProps {
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
 }
 
-const QuadrantColumn: React.FC<{
+// 定义象限配置
+type QuadrantConfig = {
     title: string;
-    tasks: Task[];
     priority: TaskPriority;
-    iconColorClass: string;
-} & Omit<TaskBoardViewProps, 'tasks' | 'selectedTaskIds'> & {selectedTaskIdsForQuadrant: number[]}> = (
+    icon: React.ReactNode;
+    bgClass: string;
+    borderClass: string;
+    iconClass: string;
+};
+
+const QuadrantColumn: React.FC<{
+    config: QuadrantConfig;
+    tasks: Task[];
+    selectedTaskIdsForQuadrant: number[];
+} & Omit<TaskBoardViewProps, 'tasks' | 'selectedTaskIds'>> = (
     {
-        title,
+        config,
         tasks,
-        priority,
-        iconColorClass,
         selectedTaskIdsForQuadrant,
         ...taskItemProps
     }
 ) => {
-    const quadrantTasks = tasks.filter(task => task.priority === priority);
+    const quadrantTasks = tasks.filter(task => task.priority === config.priority);
+    
     return (
-        <Card className={`bg-${iconColorClass}-50 dark:bg-${iconColorClass}-950/30 border-${iconColorClass}-200 dark:border-${iconColorClass}-800`}>
+        <Card className={`${config.bgClass} ${config.borderClass} h-full flex flex-col overflow-hidden`}>
             <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center">
-                    <AlertCircle className={`h-4 w-4 mr-2 text-${iconColorClass}-500`} />
-                    {title}
+                <CardTitle className="text-sm font-medium flex items-center justify-between">
+                    <div className="flex items-center">
+                        {config.icon}
+                        {config.title}
+                    </div>
+                    <span className="text-xs px-2 py-1 rounded-full bg-background/70 dark:bg-background/30">
+                        {quadrantTasks.length}
+                    </span>
                 </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 min-h-[100px]">
+            <CardContent className="flex-grow overflow-auto space-y-2 min-h-[100px]">
                 {quadrantTasks.length > 0 ? (
                     quadrantTasks.map(task => (
                         <TaskItem
@@ -56,7 +69,7 @@ const QuadrantColumn: React.FC<{
                     ))
                 ) : (
                     <div className="text-center py-3 text-sm text-muted-foreground">
-                        没有 {title.toLowerCase()} 的任务
+                        没有{config.title}的任务
                     </div>
                 )}
             </CardContent>
@@ -67,40 +80,53 @@ const QuadrantColumn: React.FC<{
 export function TaskBoardView(props: TaskBoardViewProps) {
     const { tasks, selectedTaskIds, ...taskItemCallbacks } = props;
 
+    // 定义四个象限的配置
+    const quadrants: QuadrantConfig[] = [
+        {
+            title: "重要且紧急",
+            priority: "important-urgent",
+            icon: <AlertCircle className="h-4 w-4 mr-2 text-red-500" />,
+            bgClass: "bg-red-50 dark:bg-red-950/30",
+            borderClass: "border-red-200 dark:border-red-800",
+            iconClass: "text-red-500"
+        },
+        {
+            title: "重要不紧急",
+            priority: "important-not-urgent",
+            icon: <Clock className="h-4 w-4 mr-2 text-amber-500" />,
+            bgClass: "bg-amber-50 dark:bg-amber-950/30",
+            borderClass: "border-amber-200 dark:border-amber-800",
+            iconClass: "text-amber-500"
+        },
+        {
+            title: "不重要但紧急",
+            priority: "not-important-urgent",
+            icon: <AlertTriangle className="h-4 w-4 mr-2 text-blue-500" />,
+            bgClass: "bg-blue-50 dark:bg-blue-950/30",
+            borderClass: "border-blue-200 dark:border-blue-800",
+            iconClass: "text-blue-500"
+        },
+        {
+            title: "不重要不紧急",
+            priority: "not-important-not-urgent",
+            icon: <XCircle className="h-4 w-4 mr-2 text-green-500" />,
+            bgClass: "bg-green-50 dark:bg-green-950/30",
+            borderClass: "border-green-200 dark:border-green-800",
+            iconClass: "text-green-500"
+        }
+    ];
+
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4"> {/* Usually 2x2 for Eisenhower */} 
-            <QuadrantColumn
-                title="重要且紧急"
-                tasks={tasks}
-                priority="important-urgent"
-                iconColorClass="red"
-                selectedTaskIdsForQuadrant={selectedTaskIds}
-                {...taskItemCallbacks}
-            />
-            <QuadrantColumn
-                title="重要不紧急"
-                tasks={tasks}
-                priority="important-not-urgent"
-                iconColorClass="amber"
-                selectedTaskIdsForQuadrant={selectedTaskIds}
-                {...taskItemCallbacks}
-            />
-            <QuadrantColumn
-                title="不重要但紧急"
-                tasks={tasks}
-                priority="not-important-urgent"
-                iconColorClass="blue"
-                selectedTaskIdsForQuadrant={selectedTaskIds}
-                {...taskItemCallbacks}
-            />
-            <QuadrantColumn
-                title="不重要不紧急"
-                tasks={tasks}
-                priority="not-important-not-urgent"
-                iconColorClass="green"
-                selectedTaskIdsForQuadrant={selectedTaskIds}
-                {...taskItemCallbacks}
-            />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-[calc(100vh-220px)]">
+            {quadrants.map((config, index) => (
+                <QuadrantColumn
+                    key={config.priority}
+                    config={config}
+                    tasks={tasks}
+                    selectedTaskIdsForQuadrant={selectedTaskIds}
+                    {...taskItemCallbacks}
+                />
+            ))}
         </div>
     );
 }

@@ -59,7 +59,7 @@ export function TaskListHeader({
                 <h2 className="text-xl font-semibold tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
                     {dynamicListTitle}
                 </h2>
-                <Badge variant="outline">{taskCount}</Badge>
+                <Badge variant="outline" className="text-[15px] px-1.5 py-0.5">{taskCount}</Badge>
             </div>
             <div className="flex items-center space-x-2">
                 <div className="relative">

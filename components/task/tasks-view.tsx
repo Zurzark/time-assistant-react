@@ -65,7 +65,7 @@ export function TasksView() {
   } = useTaskData();
 
   // --- Filtering and Sorting ---
-  const [selectedView, setSelectedView] = useState("next-actions"); // Main view selector (e.g., "next-actions", "trash")
+  const [selectedView, setSelectedView] = useState("all"); // Main view selector (e.g., "next-actions", "trash")
   const {
     sortedTasks, // Derived from filtered and sorted tasks from the hook
     tagCounts,

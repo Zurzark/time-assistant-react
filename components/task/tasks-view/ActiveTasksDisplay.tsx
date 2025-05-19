@@ -62,7 +62,7 @@ export function ActiveTasksDisplay({
 
     return (
         <Card>
-            <CardHeader className="p-4 md:p-6"> {/* Add padding to CardHeader if TaskListHeader itself doesn't have enough */}
+            <CardHeader className="px-4 pt-4 pb-2 md:px-6 md:pt-6 md:pb-3"> {/* Adjusted padding */}
                 <TaskListHeader
                     dynamicListTitle={dynamicListTitle}
                     taskCount={sortedTasks.length}
@@ -77,7 +77,7 @@ export function ActiveTasksDisplay({
                     onToggleSelectAll={onToggleSelectAll}
                 />
             </CardHeader>
-            <CardContent className="p-4 md:p-6"> {/* Add padding to CardContent */}
+            <CardContent className="px-4 pb-4 pt-2 md:px-6 md:pb-6 md:pt-3"> {/* Adjusted padding */}
                 {viewMode === "list" ? (
                     <TaskList
                         tasks={sortedTasks}

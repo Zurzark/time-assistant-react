@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Task, TaskPriority } from '@/lib/task-utils';
 import { Project as DBProjectType, Tag as DBTagType } from '@/lib/db'; // Corrected import for DB types
 import { DateRange } from 'react-day-picker';
-import { format } from 'date-fns';
+import { format, isPast } from 'date-fns';
 import { useDebounce } from "@/lib/client-hooks"; // Import the hook
 
 // Define task category constants - Copied from TasksView
@@ -63,6 +63,12 @@ export function useTaskFiltersAndSort({
                 if (task.completed || task.category !== TASK_CATEGORY_SOMEDAY_MAYBE) return false;
             } else if (selectedView === "waiting") {
                 if (task.completed || task.category !== TASK_CATEGORY_WAITING_FOR) return false;
+            } else if (selectedView === "in-progress") {
+                const isTaskOverdue = task.dueDate && isPast(new Date(task.dueDate)) && !task.completed;
+                if (task.completed || isTaskOverdue) return false;
+            } else if (selectedView === "overdue") {
+                const isTaskOverdue = task.dueDate && isPast(new Date(task.dueDate)) && !task.completed;
+                if (!isTaskOverdue) return false;
             }
 
             if (selectedProjectIds.length > 0) {
@@ -155,6 +161,12 @@ export function useTaskFiltersAndSort({
                 if (task.completed || task.category !== TASK_CATEGORY_SOMEDAY_MAYBE) return false;
             } else if (selectedView === "waiting") {
                 if (task.completed || task.category !== TASK_CATEGORY_WAITING_FOR) return false;
+            } else if (selectedView === "in-progress") {
+                const isTaskOverdue = task.dueDate && isPast(new Date(task.dueDate)) && !task.completed;
+                if (task.completed || isTaskOverdue) return false;
+            } else if (selectedView === "overdue") {
+                const isTaskOverdue = task.dueDate && isPast(new Date(task.dueDate)) && !task.completed;
+                if (!isTaskOverdue) return false;
             }
 
             if (selectedProjectIds.length > 0) {
@@ -263,6 +275,8 @@ export function useTaskFiltersAndSort({
             case "trash": return "回收站";
             case "completed": return "已完成";
             case "all": return "所有任务";
+            case "in-progress": return "进行中";
+            case "overdue": return "已过期";
             default: return view;
         }
     }, []);
@@ -299,81 +313,73 @@ export function useTaskFiltersAndSort({
     }, []);
 
     const dynamicListTitle = useMemo(() => {
-        if (selectedView === 'trash') {
-            // For trash, count comes from deletedTasks in useTaskData, not filteredTasks here.
-            // This title generation might need adjustment if trash count is handled differently.
-            return `回收站`; // Count will be added by the component using this title.
-        }
-
-        const activeFiltersDescription: string[] = [];
-        let titlePrefix = getTranslatedViewName(selectedView);
-
-        if (selectedProjectIds.length > 0) {
-            const projectNames = selectedProjectIds
+        const viewDisplayNames: Record<string, string> = {
+            'all': '所有任务',
+            'next-actions': '下一步行动',
+            'completed': '已完成任务',
+            'someday-maybe': '将来/也许',
+            'waiting': '等待中',
+            'in-progress': '进行中',
+            'overdue': '已过期',
+            'trash': '回收站',
+        };
+    
+        let baseTitle = viewDisplayNames[selectedView] || selectedView; // Fallback to selectedView if no mapping
+    
+        if (selectedProjectIds.length > 0 && projectList.length > 0) {
+            const selectedProjectNames = selectedProjectIds
                 .map(id => getProjectNameById(id))
-                .filter(name => name)
-                .join(', ');
-            if (projectNames) activeFiltersDescription.push(`项目: ${projectNames}`);
+                .filter(name => name !== '未知项目');
+            if (selectedProjectNames.length > 0) {
+                baseTitle += ` (${selectedProjectNames.join(', ')})`;
+            }
         }
-
+    
         if (selectedTagNames.length > 0) {
-            activeFiltersDescription.push(`标签: ${selectedTagNames.join(', ')}`);
+            baseTitle += ` #${selectedTagNames.join(' #')}`;
+        }
+    
+        if (activeDateFilter) {
+            let dateLabel = '';
+            if (activeDateFilter === 'today') dateLabel = '今天';
+            else if (activeDateFilter === 'this-week') dateLabel = '本周';
+            else if (activeDateFilter === 'next-7-days') dateLabel = '未来7天';
+            else if (activeDateFilter === 'this-month') dateLabel = '本月';
+            else if (activeDateFilter === 'no-date') dateLabel = '无日期';
+            else if (activeDateFilter === 'custom' && customDateRange) {
+                const from = customDateRange.from ? format(customDateRange.from, 'MM/dd') : '';
+                const to = customDateRange.to ? format(customDateRange.to, 'MM/dd') : '';
+                if (from && to) dateLabel = `${from} - ${to}`;
+                else if (from) dateLabel = `从 ${from}`;
+                else if (to) dateLabel = `至 ${to}`;
+                else dateLabel = '自定义范围';
+            }
+            if (dateLabel) baseTitle += ` [${dateLabel}]`;
         }
 
         if (selectedPriorities.length > 0) {
-            const priorityNames = selectedPriorities.map(getTranslatedPriorityName).join(', ');
-            activeFiltersDescription.push(`优先级: ${priorityNames}`);
-        }
-
-        const dateFilterTypeStr = getTranslatedDateFilterType(selectedDateFilterType);
-        if (activeDateFilter) {
-            if (activeDateFilter === 'custom' && customDateRange) {
-                const start = customDateRange.from ? format(customDateRange.from, "P") : '';
-                const end = customDateRange.to ? format(customDateRange.to, "P") : '';
-                if (start && end && start !== end) {
-                    activeFiltersDescription.push(`${dateFilterTypeStr}: ${start} - ${end}`);
-                } else if (start) {
-                    activeFiltersDescription.push(`${dateFilterTypeStr}: ${start}`);
-                }
-            } else if (activeDateFilter !== 'custom' && activeDateFilter !== 'no-date') {
-                activeFiltersDescription.push(`${dateFilterTypeStr}: ${getTranslatedDateFilterName(activeDateFilter)}`);
-            } else if (activeDateFilter === 'no-date') {
-                activeFiltersDescription.push(`${dateFilterTypeStr}: 无日期`);
+            const priorityLabels = selectedPriorities.map(p => {
+                if (p === 'important-urgent') return '重要且紧急';
+                if (p === 'important-not-urgent') return '重要不紧急';
+                if (p === 'not-important-urgent') return '不重要紧急';
+                if (p === 'not-important-not-urgent') return '不重要不紧急';
+                return '';
+            }).filter(Boolean);
+            if (priorityLabels.length > 0) {
+                baseTitle += ` (${priorityLabels.join(', ')})`;
             }
         }
-
-        if (debouncedSearchTerm) {
-            activeFiltersDescription.push(`搜索: "${debouncedSearchTerm}"`);
-        }
-
-        if (activeFiltersDescription.length > 0) {
-            const isDefaultView = ["next-actions", "someday-maybe", "waiting-for"].includes(selectedView);
-            if (!isDefaultView || activeFiltersDescription.length > 0) {
-                titlePrefix = "筛选结果";
-            }
-            if(isDefaultView && activeFiltersDescription.length > 0){
-                titlePrefix = `${getTranslatedViewName(selectedView)} (自定义筛选)`
-            }
-            return `${titlePrefix}: ${activeFiltersDescription.join('; ')}`;
-            // Count will be appended by the component using this (e.g. TaskListHeader)
-        }
-        return `${titlePrefix}`;
+    
+        return `${baseTitle}`;
     }, [
         selectedView, 
-        // filteredTasks.length, // Count will be handled by consumer component
         selectedProjectIds, 
-        projectList, // Dependency for getProjectNameById usage
+        projectList, 
+        getProjectNameById, 
         selectedTagNames, 
         activeDateFilter, 
         customDateRange, 
-        selectedDateFilterType, 
-        selectedPriorities, 
-        debouncedSearchTerm,
-        getProjectNameById, 
-        getTranslatedViewName, 
-        getTranslatedDateFilterName, 
-        getTranslatedDateFilterType, 
-        getTranslatedPriorityName
+        selectedPriorities
     ]);
 
     const clearAllAdvancedFilters = useCallback(() => {
