@@ -27,6 +27,7 @@ export interface Task {
   recurrenceRule?: string;
   recurrenceEndDate?: Date;
   recurrenceCount?: number;
+  defaultActivityCategoryId?: number;
 }
 
 export const NO_PROJECT_VALUE = "NO_PROJECT";
@@ -82,6 +83,7 @@ export const fromDBTaskShape = (dbTask: DBTaskType): Task => {
     recurrenceRule: dbTask.recurrenceRule as string|undefined,
     recurrenceEndDate: dbTask.recurrenceEndDate ? new Date(dbTask.recurrenceEndDate) : undefined,
     recurrenceCount: dbTask.recurrenceCount,
+    defaultActivityCategoryId: dbTask.defaultActivityCategoryId,
   };
 };
 
@@ -149,5 +151,9 @@ export const toDBTaskShape = (task: Partial<Task>): Partial<Omit<DBTaskType, 'id
     dbShape.completedAt = task.completedAt ? new Date(task.completedAt) : undefined;
   }
   
+  if (task.hasOwnProperty('defaultActivityCategoryId')) {
+    dbShape.defaultActivityCategoryId = task.defaultActivityCategoryId;
+  }
+
   return dbShape;
 }; 

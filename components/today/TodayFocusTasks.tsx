@@ -32,6 +32,7 @@ interface TodayFocusTasksProps {
     onAddTaskToTimeline: (task: Task) => void;
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
     refreshTrigger: number;
+    onOpenUnifiedAddModalForNewTask: () => void;
 }
 
 export type TabValue = "inProgress" | "due" | "completedToday" | "upcomingPlanned" | "dueSoon";
@@ -63,6 +64,7 @@ export function TodayFocusTasks({
     onAddTaskToTimeline,
     onPomodoroClick,
     refreshTrigger,
+    onOpenUnifiedAddModalForNewTask,
 }: TodayFocusTasksProps) {
     const [activeTab, setActiveTab] = useState<TabValue>("inProgress");
     const [allUtilTasks, setAllUtilTasks] = useState<Task[]>([]);
@@ -271,46 +273,44 @@ export function TodayFocusTasks({
     const renderTabContent = (tabValue: TabValue) => {
         const tasksForTab = memoizedFilteredTasks; // Use the memoized tasks for the current activeTab
         
-        if (isLoading && tasksForTab.length === 0) { // Show loading only if no tasks yet for the active tab
-            return <p className="text-center text-muted-foreground py-10">加载中...</p>;
-        }
-        if (tasksForTab.length === 0) {
-            return (
-                <div className="flex flex-col items-center justify-center text-center py-10">
-                    <div className="rounded-full bg-primary/10 p-3 mb-4">
-                         <CheckSquare className="h-8 w-8 text-primary" />
-                    </div>
-                    <h3 className="text-lg font-medium mb-1">没有任务</h3>
-                    <p className="text-muted-foreground mb-4 max-w-xs">
-                        当前没有{tabConfigs.find(tc => tc.value === tabValue)?.label.toLowerCase()}的任务。
-                    </p>
-                    {/* This button ideally triggers the UnifiedAddModal from TodayDashboard */}
-                    <Button variant="outline" size="sm" onClick={() => console.log('Trigger UnifiedAddModal') }>
-                        <Plus className="h-4 w-4 mr-2" /> 添加任务
-                    </Button>
-                </div>
-            );
-        }
+        // 始终使用相同的容器结构，确保页签内容位置一致
         return (
-            // Adjust max-h: considering header, tabs, and some padding. Parent Card has h-full.
-            // Let CardContent with flex-grow handle height, and this div be scrollable.
-            <div className="space-y-3 py-4 overflow-y-auto flex-grow pr-1"> 
-                {tasksForTab.map(task => (
-                    <TaskItem
-                        key={task.id}
-                        task={task} 
-                        isSelected={false} 
-                        viewMode="list"
-                        getProjectNameById={getProjectNameById}
-                        onSelectTask={() => {}} 
-                        onToggleComplete={() => { onToggleComplete(task.id); }}
-                        onEditTask={() => onEditTask(task)} // Assuming onEditTask might lead to data changes that need refresh
-                        onDeleteTask={() => { onDeleteTask(task.id); }}
-                        onToggleFrogStatus={() => { onToggleFrogStatus(task.id); }}
-                        onAddTaskToTimeline={(t) => onAddTaskToTimeline(t)} // t is already the full task object
-                        onPomodoroClick={() => onPomodoroClick(task.id, task.title)}
-                    />
-                ))}
+            <div className="space-y-3 py-4 overflow-y-auto flex-grow pr-1">
+                {isLoading && tasksForTab.length === 0 ? (
+                    <div className="flex items-center justify-center h-full">
+                        <p className="text-muted-foreground">加载中...</p>
+                    </div>
+                ) : tasksForTab.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center text-center h-full">
+                        <div className="rounded-full bg-primary/10 p-3 mb-4">
+                            <CheckSquare className="h-8 w-8 text-primary" />
+                        </div>
+                        <h3 className="text-lg font-medium mb-1">没有任务</h3>
+                        <p className="text-muted-foreground mb-4 max-w-xs">
+                            当前没有{tabConfigs.find(tc => tc.value === tabValue)?.label.toLowerCase()}的任务。
+                        </p>
+                        <Button variant="outline" size="sm" onClick={onOpenUnifiedAddModalForNewTask}> 
+                            <Plus className="h-4 w-4 mr-2" /> 添加任务
+                        </Button>
+                    </div>
+                ) : (
+                    tasksForTab.map(task => (
+                        <TaskItem
+                            key={task.id}
+                            task={task} 
+                            isSelected={false} 
+                            viewMode="list"
+                            getProjectNameById={getProjectNameById}
+                            onSelectTask={() => {}} 
+                            onToggleComplete={() => { onToggleComplete(task.id); }}
+                            onEditTask={() => onEditTask(task)} // Assuming onEditTask might lead to data changes that need refresh
+                            onDeleteTask={() => { onDeleteTask(task.id); }}
+                            onToggleFrogStatus={() => { onToggleFrogStatus(task.id); }}
+                            onAddTaskToTimeline={(t) => onAddTaskToTimeline(t)} // t is already the full task object
+                            onPomodoroClick={() => onPomodoroClick(task.id, task.title)}
+                        />
+                    ))
+                )}
             </div>
         );
     };
@@ -334,12 +334,14 @@ export function TodayFocusTasks({
                             </TabsTrigger>
                         ))}
                     </TabsList>
-                    {/* Ensure TabsContent stretches and its inner div scrolls */}
-                    {tabConfigs.map(tab => (
-                        <TabsContent key={tab.value} value={tab.value} className="flex-grow mt-2 flex flex-col">
-                           {activeTab === tab.value && renderTabContent(tab.value)} {/* Render content only for active tab to optimize */}
-                        </TabsContent>
-                    ))}
+                    {/* 只渲染当前活动标签页的内容 */}
+                    <TabsContent 
+                        value={activeTab} 
+                        className="flex-grow mt-2 flex flex-col"
+                        forceMount
+                    >
+                        {renderTabContent(activeTab)}
+                    </TabsContent>
                 </Tabs>
             </CardContent>
         </Card>

@@ -196,6 +196,7 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
           <div className="flex items-start justify-between mb-1"> {/* Changed mb-1.5 to mb-1 */}
             <h4 className={cn("font-medium text-sm truncate flex-grow mr-2 group-hover:text-primary dark:group-hover:text-blue-400", titleTextStyles)} title={blockTitle}>
               {isCurrentBlock && <Timer className="h-3.5 w-3.5 mr-1.5 inline-block animate-pulse text-blue-500" />}
+              {task && task.isFrog === 1 && <span className="mr-1" title="青蛙任务">🐸</span>}
               {blockTitle}
             </h4>
             <div className="text-right shrink-0">

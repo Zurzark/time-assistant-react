@@ -108,7 +108,6 @@ export function TaskItem({
     const handleTimelineAdd = () => {
         if(task.id === undefined) return;
         onAddTaskToTimeline(task);
-        toast.success(`任务 "${task.title}" 已添加到时间轴`);
     };
 
     const handlePomodoro = (e: React.MouseEvent) => {

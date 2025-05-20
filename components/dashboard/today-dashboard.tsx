@@ -15,6 +15,10 @@ import { Task as TaskUtilsTask } from "@/lib/task-utils"
 import * as db from "@/lib/db"; // 导入数据库操作
 import { toast } from "sonner"; // 导入 toast 用于提示
 
+// Import useTaskData and SelectTimeRangeModal
+import { useTaskData } from "@/components/task/tasks-view/hooks/useTaskData";
+import { SelectTimeRangeModal } from "@/components/task/SelectTimeRangeModal";
+
 export function TodayDashboard() {
   const [timeRange, setTimeRange] = useState("today")
   const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false)
@@ -22,6 +26,16 @@ export function TodayDashboard() {
   const [isUnifiedAddModalOpen, setIsUnifiedAddModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<TaskUtilsTask | null>(null)
   const [todayFocusRefreshKey, setTodayFocusRefreshKey] = useState(0)
+
+  // Use useTaskData for timeline functionality
+  const {
+    handleAddTaskToTimeline: openTimeSelectModal, // Rename for clarity in this context
+    isSelectTimeModalOpen,
+    setIsSelectTimeModalOpen,
+    taskForTimelineModal,
+    handleConfirmTimeRangeAndAddTask,
+    // We might need other things from useTaskData if interaction is deeper, but for now, this is minimal.
+  } = useTaskData();
 
   const today = new Date()
   const formattedDate = today.toLocaleDateString("zh-CN", {
@@ -62,6 +76,11 @@ export function TodayDashboard() {
     setEditingTask(task)
     setIsUnifiedAddModalOpen(true)
   }
+
+  const handleOpenUnifiedAddModalForNewTask = () => {
+    setEditingTask(null); //确保是新建任务模式
+    setIsUnifiedAddModalOpen(true);
+  };
 
   const getProjectNameById = (projectId: number | string | undefined): string => {
     if (projectId === 1) return "项目A"
@@ -131,16 +150,21 @@ export function TodayDashboard() {
     }
   }
 
-  const onAddTaskToTimeline = (task: TaskUtilsTask) => {
-    console.log("Attempting to add task to timeline:", task.title, task.id);
-    // TODO: Implement the actual logic to add the task to the timeline data store.
-    // This might involve updating IndexedDB, a state variable, or calling an API.
-    // Example: await db.addTimeToBlock(task) or similar.
-    toast.info(`"${task.title}" 已尝试添加到时间轴。请实现具体添加逻辑。`);
-    console.warn(`请在 TodayDashboard.tsx 中的 onAddTaskToTimeline 函数中实现将任务 "${task.title}" 添加到时间轴的实际逻辑。`);
-    // Assuming timeline might need a refresh similar to TodayFocusTasks
-    triggerTodayFocusRefresh(); 
-  }
+  // This function will be passed to child components (FrogTasksCard, TodayFocusTasks)
+  // It expects a TaskUtilsTask object.
+  const handleOpenTimeSelectModalForTask = (task: TaskUtilsTask) => {
+    if (!task || task.id === undefined) {
+        toast.error("无效的任务，无法添加到时间轴。");
+        return;
+    }
+    if (task.completed) {
+        toast.info(`任务 "${task.title}" 已完成，无法直接添加到时间轴。`);
+        return;
+    }
+    // The openTimeSelectModal (originally handleAddTaskToTimeline from useTaskData)
+    // expects a Task type from task-utils. TaskUtilsTask should be compatible.
+    openTimeSelectModal(task); 
+  };
 
   return (
     <TaskStatsProvider>
@@ -167,7 +191,11 @@ export function TodayDashboard() {
           <div className="lg:col-span-2 flex flex-col gap-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <TaskStatsCard timeRange={timeRange} setTimeRange={setTimeRange} />
-              <FrogTasksCard onPomodoroClick={handlePomodoroClick} />
+              <FrogTasksCard 
+                onPomodoroClick={handlePomodoroClick} 
+                refreshTrigger={todayFocusRefreshKey} 
+                onOpenTimeSelectModal={handleOpenTimeSelectModalForTask} // Pass the new handler
+              />
             </div>
             <div className="flex-grow flex flex-col min-h-0">
               <TodayFocusTasks
@@ -178,8 +206,9 @@ export function TodayDashboard() {
                 onToggleComplete={onToggleComplete}
                 onDeleteTask={onDeleteTask}
                 onToggleFrogStatus={onToggleFrogStatus}
-                onAddTaskToTimeline={onAddTaskToTimeline}
+                onAddTaskToTimeline={handleOpenTimeSelectModalForTask} // Pass the new handler
                 onPomodoroClick={handlePomodoroClick}
+                onOpenUnifiedAddModalForNewTask={handleOpenUnifiedAddModalForNewTask}
               />
             </div>
           </div>
@@ -198,6 +227,14 @@ export function TodayDashboard() {
           clearEditingTask={() => setEditingTask(null)}
         />
       </div>
+
+      {/* Render the SelectTimeRangeModal globally for the dashboard */}
+      <SelectTimeRangeModal
+        isOpen={isSelectTimeModalOpen}
+        onOpenChange={setIsSelectTimeModalOpen}
+        task={taskForTimelineModal} // taskForTimelineModal is already of Task type from useTaskData
+        onConfirm={handleConfirmTimeRangeAndAddTask}
+      />
     </TaskStatsProvider>
   )
 }

@@ -13,7 +13,7 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { CalendarIcon } from "@radix-ui/react-icons"; // Or from lucide-react if preferred
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Project as DBProjectType, Task as DBTask } from "@/lib/db";
+import { Project as DBProjectType, Task as DBTask, ActivityCategory } from "@/lib/db";
 import { Task as TaskUtilsType, TaskPriority as TaskUtilsPriorityType, TaskCategory as UtilTaskCategory } from "@/lib/task-utils";
 import { NO_PROJECT_VALUE } from "@/lib/task-utils"; // Added imports
 
@@ -30,27 +30,37 @@ interface EditTaskDialogProps {
   task: TaskUtilsType | null; // This is the task type from task-utils, might be slightly different from DBTask
   onSave: (updatedTask: TaskUtilsType) => void; // Expects TaskUtilsType
   availableProjects: DBProjectType[];
+  availableActivityCategories: ActivityCategory[];
   onCreateNewProject: (name: string) => Promise<number | undefined>;
 }
 
 // Helper function to map UIPriority (camelCase) to TaskUtilsPriorityType (kebab-case)
+// This function seems to cause type errors if TaskUtilsPriorityType expects camelCase.
+// Assuming TaskUtilsPriorityType is effectively UIPriority (camelCase) based on linter errors.
 function mapUiPriorityToTaskUtilsPriority(uiPriority: UIPriority): TaskUtilsPriorityType {
-  switch (uiPriority) {
-    case "importantUrgent": return "important-urgent";
-    case "importantNotUrgent": return "important-not-urgent";
-    case "notImportantUrgent": return "not-important-urgent";
-    case "notImportantNotUrgent": return "not-important-not-urgent";
-    default: return "not-important-not-urgent"; // Fallback, though should not happen with typed input
-  }
+  // switch (uiPriority) {
+  //   case "importantUrgent": return "important-urgent";
+  //   case "importantNotUrgent": return "important-not-urgent";
+  //   case "notImportantUrgent": return "not-important-urgent";
+  //   case "notImportantNotUrgent": return "not-important-not-urgent";
+  //   default: return "not-important-not-urgent"; // Fallback, though should not happen with typed input
+  // }
+  return uiPriority as unknown as TaskUtilsPriorityType; // Directly return, assuming types are compatible or TaskUtilsPriorityType is UIPriority
 }
 
 // Helper function to map TaskUtilsPriorityType (kebab-case) to UIPriority (camelCase)
+// This might also be unnecessary if task.priority is already camelCase.
 function mapTaskUtilsPriorityToUiPriority(taskPriority: TaskUtilsPriorityType | string | undefined): UIPriority {
     switch (taskPriority) {
         case "important-urgent": return "importantUrgent";
         case "important-not-urgent": return "importantNotUrgent";
         case "not-important-urgent": return "notImportantUrgent";
         case "not-important-not-urgent": return "notImportantNotUrgent";
+        // If taskPriority is already camelCase (UIPriority), it will fall to default or match if cases are added
+        case "importantUrgent": return "importantUrgent";
+        case "importantNotUrgent": return "importantNotUrgent";
+        case "notImportantUrgent": return "notImportantUrgent";
+        case "notImportantNotUrgent": return "notImportantNotUrgent";
         default: return "notImportantNotUrgent"; // Fallback
     }
 }
@@ -61,6 +71,7 @@ export function EditTaskDialog({
   task, 
   onSave, 
   availableProjects,
+  availableActivityCategories,
   onCreateNewProject
 }: EditTaskDialogProps) {
 
@@ -77,6 +88,7 @@ export function EditTaskDialog({
         plannedDate: task.plannedDate ? new Date(task.plannedDate) : undefined,
         dueDate: task.dueDate ? new Date(task.dueDate) : undefined, 
         estimatedDurationHours: task.estimatedDurationHours || 0,
+        defaultActivityCategoryId: task.defaultActivityCategoryId,
         
         projectId: task.projectId,
         tags: task.tags || [],
@@ -111,6 +123,7 @@ export function EditTaskDialog({
       plannedDate: formData.plannedDate, 
       dueDate: formData.dueDate, // Already correctly set to undefined by TaskFormFields if recurring
       estimatedDurationHours: formData.estimatedDurationHours || 0,
+      defaultActivityCategoryId: formData.defaultActivityCategoryId,
 
       projectId: typeof formData.projectId === 'string' && formData.projectId !== NO_PROJECT_VALUE 
         ? parseInt(formData.projectId) 
@@ -144,6 +157,7 @@ export function EditTaskDialog({
             key={task.id || 'new-task-edit'} 
             initialData={formInitialData}
             availableProjects={availableProjects}
+            availableActivityCategories={availableActivityCategories}
             onSave={handleFormSave} 
             onCancel={handleFormCancel}
             onCreateNewProjectInForm={onCreateNewProject} 

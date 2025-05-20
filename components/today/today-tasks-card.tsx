@@ -20,6 +20,9 @@ import { cn } from "@/lib/utils"
 import { type Task as DBTask, ObjectStores, getAll, update as updateDB, add as addDB, type TimeBlock as DBTimeBlock } from "@/lib/db"
 import { Badge } from "@/components/ui/badge"
 import { formatTimeForDisplay, checkTimeOverlap } from "@/lib/utils"
+import { SelectTimeRangeModal } from "@/components/task/SelectTimeRangeModal"
+import { toast } from "sonner"
+import { type Task } from "@/lib/task-utils"
 
 interface TodayTasksCardProps {
   onPomodoroClick: (taskId: string, taskTitle: string) => void
@@ -49,6 +52,8 @@ export function TodayTasksCard({ onPomodoroClick, onViewAllClick, onAddTaskClick
   const [tasks, setTasks] = useState<UITodayTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isSelectTimeModalOpen, setIsSelectTimeModalOpen] = useState(false)
+  const [taskForTimelineModal, setTaskForTimelineModal] = useState<UITodayTask | null>(null)
 
   const loadTodayTasks = useCallback(async () => {
     setLoading(true)
@@ -142,119 +147,68 @@ export function TodayTasksCard({ onPomodoroClick, onViewAllClick, onAddTaskClick
 
   const handleAddTaskToTimeline = async (taskItem: UITodayTask) => {
     if (!taskItem.id) {
-      alert("任务ID无效，无法添加到时间轴。");
-      return;
+      toast.error("任务ID无效，无法添加到时间轴。")
+      return
     }
+    if (taskItem.completed) {
+      toast.info(`任务 "${taskItem.title}" 已完成，无法直接添加到时间轴。`)
+      return
+    }
+    setTaskForTimelineModal(taskItem)
+    setIsSelectTimeModalOpen(true)
+  }
+
+  const handleConfirmTimeRangeAndAddTaskCard = async (
+    taskId: string,
+    taskTitle: string,
+    date: string,
+    startTimeString: string,
+    endTimeString: string
+  ) => {
     try {
-      const todayString = new Date().toISOString().split('T')[0];
-      const todayDateObj = new Date(todayString + 'T00:00:00Z');
+      const startDateTime = new Date(`${date}T${startTimeString}`)
+      const endDateTime = new Date(`${date}T${endTimeString}`)
 
-      const taskId = String(taskItem.id);
-      const title = taskItem.title;
-      const type = 'task';
-      const date = todayString;
-
-      let durationMinutes = 60;
-      if (taskItem.estimatedPomodoros && taskItem.estimatedPomodoros > 0) {
-        durationMinutes = taskItem.estimatedPomodoros * 25;
+      if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+        toast.error("选择的日期或时间无效。")
+        return
       }
-      const durationMilliseconds = durationMinutes * 60 * 1000;
-
-      const existingDbBlocks = await getAll<DBTimeBlock>(ObjectStores.TIME_BLOCKS);
-      const todayBlocks = existingDbBlocks
-        .filter(block => block.date === todayString && block.id !== undefined)
-        .map(block => ({
-          ...block,
-          startTime: new Date(block.startTime), 
-          endTime: new Date(block.endTime),
-        }))
-        .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
-
-      let proposedStartTime: Date | null = null;
-      let proposedEndTime: Date | null = null;
-      
-      const now = new Date();
-      const localTodayDateObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-      const earliestPossibleStart = new Date(localTodayDateObj);
-      earliestPossibleStart.setHours(7, 0, 0, 0); 
-
-      let searchStart = now > earliestPossibleStart ? new Date(now.getTime()) : new Date(earliestPossibleStart.getTime());
-      
-      const minutes = searchStart.getMinutes();
-      const remainder = minutes % 5;
-      if (remainder !== 0) {
-        searchStart.setMinutes(minutes + (5 - remainder), 0, 0);
-      }
-
-      let slotFound = false;
-      const MIN_GAP_MINUTES = 5; 
-      const MAX_ITERATIONS = 100;
-      let iterations = 0;
-
-      while(!slotFound && iterations < MAX_ITERATIONS) {
-        iterations++;
-        let currentProposedStart = new Date(searchStart);
-        let currentProposedEnd = new Date(currentProposedStart.getTime() + durationMilliseconds);
-
-        let overlap = false;
-        for (const block of todayBlocks) {
-          if (checkTimeOverlap(currentProposedStart, currentProposedEnd, block.startTime, block.endTime, MIN_GAP_MINUTES)) {
-            overlap = true;
-            searchStart = new Date(block.endTime.getTime() + MIN_GAP_MINUTES * 60 * 1000);
-            const currentMinutes = searchStart.getMinutes();
-            const currentRemainder = currentMinutes % 5;
-            if (currentRemainder !== 0) {
-              searchStart.setMinutes(currentMinutes + (5 - currentRemainder), 0, 0);
-            }
-            break;
-          }
-        }
-
-        if (!overlap) {
-          const endOfDayLimit = new Date(localTodayDateObj);
-          endOfDayLimit.setHours(22, 0, 0, 0); 
-          if (currentProposedEnd > endOfDayLimit) {
-            alert(`未能为任务 "${title}" 找到今天 ${durationMinutes} 分钟的合适时段（已到${formatTimeForDisplay(endOfDayLimit)}）。请尝试缩短任务时长或手动在时间轴上安排。`);
-            return;
-          }
-          proposedStartTime = currentProposedStart;
-          proposedEndTime = currentProposedEnd;
-          slotFound = true;
-        }
-      }
-      
-      if (!slotFound || !proposedStartTime || !proposedEndTime) { 
-          alert(`无法为任务 "${title}" 自动找到 ${durationMinutes} 分钟的空闲时间段。请尝试手动安排或检查当天日程。`);
-          return;
+      if (endDateTime <= startDateTime) {
+        toast.error("结束时间必须晚于开始时间。")
+        return
       }
 
       const newTimeBlock: Omit<DBTimeBlock, 'id'> = {
         taskId: taskId,
-        title: title,
-        type: type,
-        startTime: proposedStartTime,
-        endTime: proposedEndTime,
+        title: taskTitle,
+        sourceType: 'task_plan_manual_today_card',
+        activityCategoryId: undefined,
+        startTime: startDateTime,
+        endTime: endDateTime,
+        actualStartTime: undefined,
+        actualEndTime: undefined,
+        isLogged: 0,
+        notes: undefined,
         date: date,
         createdAt: new Date(),
         updatedAt: new Date(),
-      };
-      newTimeBlock.date = proposedStartTime.toISOString().split('T')[0];
-
-      await addDB(ObjectStores.TIME_BLOCKS, newTimeBlock);
-
-      window.dispatchEvent(new CustomEvent('timelineShouldUpdate'));
-      alert(`任务 "${title}" 已添加到今日时间轴 ${formatTimeForDisplay(proposedStartTime)} - ${formatTimeForDisplay(proposedEndTime)}。`);
-
-    } catch (error) {
-      console.error("添加到时间轴时出错:", error);
-      let errorMessage = "添加到时间轴时发生未知错误。";
-      if (error instanceof Error) {
-        errorMessage = `添加到时间轴失败: ${error.message}`;
       }
-      alert(errorMessage);
+
+      await addDB(ObjectStores.TIME_BLOCKS, newTimeBlock as DBTimeBlock)
+      window.dispatchEvent(new CustomEvent('timelineShouldUpdate'))
+      toast.success(
+        `任务 "${taskTitle}" 已添加到时间轴 ${formatTimeForDisplay(startDateTime)} - ${formatTimeForDisplay(endDateTime)}。`
+      )
+      setIsSelectTimeModalOpen(false)
+    } catch (err) {
+      console.error("添加到时间轴时出错 (TodayTasksCard):", err)
+      let errorMessage = "添加到时间轴时发生未知错误。"
+      if (err instanceof Error) {
+        errorMessage = `添加到时间轴失败: ${err.message}`
+      }
+      toast.error(errorMessage)
     }
-  };
+  }
 
   if (loading) {
     return (
@@ -285,97 +239,103 @@ export function TodayTasksCard({ onPomodoroClick, onViewAllClick, onAddTaskClick
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-md font-medium">今日任务</CardTitle>
+    <>
+      <Card className="h-full flex flex-col">
+        <CardHeader className="flex flex-row items-center justify-between py-3 px-4 border-b">
+          <CardTitle className="text-base font-semibold">今日到期</CardTitle>
           <Button variant="ghost" size="sm" onClick={onViewAllClick}>
             查看全部
           </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="pb-2">
-        {tasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-6 text-center">
-            <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
-            <p className="text-sm text-muted-foreground">今天没有待办任务！</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {tasks.map((task) => (
-              <div key={task.id} className="flex items-start space-x-2">
-                <Checkbox
-                  id={`today-task-${task.id}`}
-                  checked={task.completed === 1}
-                  onCheckedChange={() => handleCheckboxChange(task.id)}
-                  className="mt-0.5"
-                />
-                <div className="flex-1">
-                  <label
-                    htmlFor={`today-task-${task.id}`}
-                    className={cn(
-                      "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
-                      task.completed === 1 && "line-through text-muted-foreground",
-                    )}
-                  >
-                    {task.title}
-                  </label>
-                  <div className="flex items-center mt-1">
-                    <Badge
-                      variant="outline"
+        </CardHeader>
+        <CardContent className="pb-2">
+          {tasks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
+              <p className="text-sm text-muted-foreground">今天没有待办任务！</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {tasks.map((task) => (
+                <div key={task.id} className="flex items-start space-x-2">
+                  <Checkbox
+                    id={`today-task-${task.id}`}
+                    checked={task.completed === 1}
+                    onCheckedChange={() => handleCheckboxChange(task.id)}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <label
+                      htmlFor={`today-task-${task.id}`}
                       className={cn(
-                        "text-xs mr-2",
-                        task.priorityDisplay === "high" ? "border-red-500 text-red-500"
-                          : task.priorityDisplay === "medium" ? "border-amber-500 text-amber-500"
-                          : "border-green-500 text-green-500",
+                        "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
+                        task.completed === 1 && "line-through text-muted-foreground",
                       )}
                     >
-                      {task.priorityDisplay === "high" ? "紧急" : task.priorityDisplay === "medium" ? "中等" : "低"}
-                    </Badge>
-                    {task.dueDate && new Date(task.dueDate).getHours() !== 0 && (
-                      <span className="text-xs text-muted-foreground flex items-center">
-                        <Clock className="h-3 w-3 mr-1" />
-                        {new Date(task.dueDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                      </span>
-                    )}
+                      {task.title}
+                    </label>
+                    <div className="flex items-center mt-1">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-xs mr-2",
+                          task.priorityDisplay === "high" ? "border-red-500 text-red-500"
+                            : task.priorityDisplay === "medium" ? "border-amber-500 text-amber-500"
+                            : "border-green-500 text-green-500",
+                        )}
+                      >
+                        {task.priorityDisplay === "high" ? "紧急" : task.priorityDisplay === "medium" ? "中等" : "低"}
+                      </Badge>
+                      {task.dueDate && new Date(task.dueDate).getHours() !== 0 && (
+                        <span className="text-xs text-muted-foreground flex items-center">
+                          <Clock className="h-3 w-3 mr-1" />
+                          {new Date(task.dueDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => onPomodoroClick(String(task.id), task.title)}
+                    >
+                      <Timer className="h-4 w-4" />
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => alert(`编辑任务: ${task.title} (ID: ${task.id})`)}>编辑</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => alert("标记为青蛙功能待实现")}>标记为青蛙</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)} disabled={task.completed === 1}>
+                          <CalendarDays className="mr-2 h-4 w-4" />
+                          添加到时间轴
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleDeleteTask(task.id)} className="text-red-500">删除</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
-                <div className="flex items-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => onPomodoroClick(String(task.id), task.title)}
-                  >
-                    <Timer className="h-4 w-4" />
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => alert(`编辑任务: ${task.title} (ID: ${task.id})`)}>编辑</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => alert("标记为青蛙功能待实现")}>标记为青蛙</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleAddTaskToTimeline(task)}>
-                        <CalendarDays className="mr-2 h-4 w-4" />
-                        添加到时间轴
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleDeleteTask(task.id)} className="text-red-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/50">删除</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-      <CardFooter className="pt-2">
-        <Button variant="outline" size="sm" className="w-full" onClick={onAddTaskClick}>
-          添加任务
-        </Button>
-      </CardFooter>
-    </Card>
+              ))}
+            </div>
+          )}
+        </CardContent>
+        <CardFooter className="pt-2">
+          <Button variant="outline" size="sm" className="w-full" onClick={onAddTaskClick}>
+            添加任务
+          </Button>
+        </CardFooter>
+      </Card>
+      <SelectTimeRangeModal
+        isOpen={isSelectTimeModalOpen}
+        onOpenChange={setIsSelectTimeModalOpen}
+        task={taskForTimelineModal as Task | null}
+        onConfirm={handleConfirmTimeRangeAndAddTaskCard}
+      />
+    </>
   )
 } 

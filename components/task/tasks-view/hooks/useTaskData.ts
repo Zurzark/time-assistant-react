@@ -57,6 +57,10 @@ export function useTaskData() {
     // For Pomodoro Modal - to select a task
     const [selectedTaskForPomodoro, setSelectedTaskForPomodoro] = useState<{ id: string; title: string } | null>(null);
 
+    // State for the new time selection modal
+    const [isSelectTimeModalOpen, setIsSelectTimeModalOpen] = useState(false);
+    const [taskForTimelineModal, setTaskForTimelineModal] = useState<Task | null>(null);
+
 
     const dispatchStatsUpdate = useCallback(() => {
         window.dispatchEvent(new CustomEvent('taskDataChangedForStats'));
@@ -460,104 +464,79 @@ export function useTaskData() {
             toast.info(`任务 "${taskItem.title}" 已完成，无法直接添加到时间轴。`);
             return;
         }
-        try {
-            const todayString = new Date().toISOString().split('T')[0];
-            const taskId = String(taskItem.id);
-            const title = taskItem.title;
-            const type = 'task';
-            let durationMinutes = 60;
-            if (taskItem.estimatedDurationHours && taskItem.estimatedDurationHours > 0) {
-                durationMinutes = taskItem.estimatedDurationHours * 60;
-            }
-            const durationMilliseconds = durationMinutes * 60 * 1000;
-            const existingDbBlocks = await getAll<DBTimeBlockType>(ObjectStores.TIME_BLOCKS);
-            const todayBlocks = existingDbBlocks
-                .filter(block => block.date === todayString && block.id !== undefined)
-                .map(block => ({
-                    ...block,
-                    startTime: new Date(block.startTime),
-                    endTime: new Date(block.endTime),
-                }))
-                .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+        // Open the modal instead of auto-finding time
+        setTaskForTimelineModal(taskItem);
+        setIsSelectTimeModalOpen(true);
+    }, []);
 
-            let proposedStartTime: Date | null = null;
-            let proposedEndTime: Date | null = null;
-            const now = new Date();
-            const localTodayDateObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const earliestPossibleStart = new Date(localTodayDateObj);
-            earliestPossibleStart.setHours(7, 0, 0, 0);
-            let searchStart = now > earliestPossibleStart ? new Date(now.getTime()) : new Date(earliestPossibleStart.getTime());
-            const minutes = searchStart.getMinutes();
-            const remainder = minutes % 5;
-            if (remainder !== 0) {
-                searchStart.setMinutes(minutes + (5 - remainder), 0, 0);
-            }
+    const handleConfirmTimeRangeAndAddTask = useCallback(
+        async (
+            taskId: string,
+            taskTitle: string,
+            date: string,
+            startTimeString: string,
+            endTimeString: string
+        ) => {
+            try {
+                const startDateTime = new Date(`${date}T${startTimeString}`);
+                const endDateTime = new Date(`${date}T${endTimeString}`);
 
-            let slotFound = false;
-            const MIN_GAP_MINUTES = 5;
-            const MAX_ITERATIONS = 100;
-            let iterations = 0;
-
-            while (!slotFound && iterations < MAX_ITERATIONS) {
-                iterations++;
-                let currentProposedStart = new Date(searchStart);
-                let currentProposedEnd = new Date(currentProposedStart.getTime() + durationMilliseconds);
-                let overlap = false;
-                for (const block of todayBlocks) {
-                    if (checkTimeOverlap(currentProposedStart, currentProposedEnd, block.startTime, block.endTime, MIN_GAP_MINUTES)) {
-                        overlap = true;
-                        searchStart = new Date(block.endTime.getTime() + MIN_GAP_MINUTES * 60 * 1000);
-                        const currentMinutesLoop = searchStart.getMinutes();
-                        const currentRemainderLoop = currentMinutesLoop % 5;
-                        if (currentRemainderLoop !== 0) {
-                            searchStart.setMinutes(currentMinutesLoop + (5 - currentRemainderLoop), 0, 0);
-                        }
-                        break;
-                    }
+                if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+                    toast.error("选择的日期或时间无效。");
+                    return;
                 }
-                if (!overlap) {
-                    const endOfDayLimit = new Date(localTodayDateObj);
-                    endOfDayLimit.setHours(22, 0, 0, 0);
-                    if (currentProposedEnd > endOfDayLimit) {
-                        toast.error(`未能为任务 "${title}" 找到今天 ${durationMinutes} 分钟的合适时段（已到${formatTimeForDisplay(endOfDayLimit)}）。`);
-                        return;
-                    }
-                    proposedStartTime = currentProposedStart;
-                    proposedEndTime = currentProposedEnd;
-                    slotFound = true;
+
+                if (endDateTime <= startDateTime) {
+                    toast.error("结束时间必须晚于开始时间。");
+                    return;
                 }
+                
+                // Optional: Check for overlaps with existing time blocks if needed,
+                // or assume user is responsible for picking a valid slot.
+                // For simplicity, we'll skip advanced overlap check here for now.
+                // const existingDbBlocks = await getAll<DBTimeBlockType>(ObjectStores.TIME_BLOCKS);
+                // const blocksOnSelectedDate = existingDbBlocks.filter(block => block.date === date);
+                // for (const block of blocksOnSelectedDate) {
+                //     if (checkTimeOverlap(startDateTime, endDateTime, new Date(block.startTime), new Date(block.endTime), 0)) {
+                //         toast.error(`所选时间段与 "${block.title}" (${formatTimeForDisplay(new Date(block.startTime))} - ${formatTimeForDisplay(new Date(block.endTime))}) 存在冲突。`);
+                //         return;
+                //     }
+                // }
+
+                const newTimeBlock: Omit<DBTimeBlockType, 'id'> = {
+                    taskId: taskId,
+                    title: taskTitle,
+                    sourceType: 'task_plan_manual', // Indicate manual planning
+                    activityCategoryId: undefined, // Or derive from task if applicable
+                    startTime: startDateTime,
+                    endTime: endDateTime,
+                    actualStartTime: undefined,
+                    actualEndTime: undefined,
+                    isLogged: 0,
+                    notes: undefined, // Could add notes from modal if needed
+                    date: date,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                };
+
+                await add(ObjectStores.TIME_BLOCKS, newTimeBlock);
+                window.dispatchEvent(new CustomEvent('timelineShouldUpdate'));
+                toast.success(
+                    `任务 "${taskTitle}" 已添加到时间轴 ${formatTimeForDisplay(startDateTime)} - ${formatTimeForDisplay(endDateTime)}。`
+                );
+                setIsSelectTimeModalOpen(false); // Close modal on success
+            } catch (error) {
+                console.error("添加到时间轴时出错 (manual):", error);
+                let errorMessage = "添加到时间轴时发生未知错误。";
+                if (error instanceof Error) {
+                    errorMessage = `添加到时间轴失败: ${error.message}`;
+                }
+                toast.error(errorMessage);
+                // Optionally, keep modal open on error, or provide more specific feedback
             }
-            if (!slotFound || !proposedStartTime || !proposedEndTime) {
-                toast.error(`无法为任务 "${title}" 自动找到 ${durationMinutes} 分钟的空闲时间段。`);
-                return;
-            }
-            const newTimeBlock: Omit<DBTimeBlockType, 'id'> = {
-                taskId: taskId,
-                title: title,
-                sourceType: 'task_plan',
-                activityCategoryId: undefined,
-                startTime: proposedStartTime,
-                endTime: proposedEndTime,
-                actualStartTime: undefined,
-                actualEndTime: undefined,
-                isLogged: 0,
-                notes: undefined,
-                date: proposedStartTime.toISOString().split('T')[0],
-                createdAt: new Date(),
-                updatedAt: new Date(),
-            };
-            await add(ObjectStores.TIME_BLOCKS, newTimeBlock);
-            window.dispatchEvent(new CustomEvent('timelineShouldUpdate'));
-            toast.success(`任务 "${title}" 已添加到今日时间轴 ${formatTimeForDisplay(proposedStartTime)} - ${formatTimeForDisplay(proposedEndTime)}。`);
-        } catch (error) {
-            console.error("添加到时间轴时出错:", error);
-            let errorMessage = "添加到时间轴时发生未知错误。";
-            if (error instanceof Error) {
-                errorMessage = `添加到时间轴失败: ${error.message}`;
-            }
-            toast.error(errorMessage);
-        }
-    }, []); // Assuming taskItem.estimatedDurationHours is part of Task type from task-utils
+        },
+        [] // Dependencies: any external state/functions used (e.g. getAll, add, checkTimeOverlap if re-enabled)
+    );
 
     const emptyAllTrashItems = async () => {
         setIsEmplyingAllTrash(true);
@@ -619,5 +598,11 @@ export function useTaskData() {
         dispatchStatsUpdate,
         emptyAllTrashItems,
         isEmplyingAllTrash, // Ensure this is exported
+
+        // For the new time selection modal
+        isSelectTimeModalOpen,
+        setIsSelectTimeModalOpen,
+        taskForTimelineModal,
+        handleConfirmTimeRangeAndAddTask,
     };
 }

@@ -4,7 +4,7 @@
 // 并根据模式调整表单行为、标题和预填数据。
 // 它处理时间块的各种属性，包括标题、分类、关联任务、起止时间、实际起止时间、备注等。
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -82,78 +82,88 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
   activityCategories = [],
 }) => {
   const { toast } = useToast();
-  const [formData, setFormData] = useState<FormData>(getDefaultFormData());
+  const [formData, setFormData] = useState<FormData>({
+    title: "",
+    activityCategoryId: "",
+    taskId: "",
+    date: new Date(),
+    startTime: "",
+    endTime: "",
+    notes: "",
+  });
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof FormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  function getDefaultFormData(): FormData {
-    const defaultDate = initialData?.date ? (typeof initialData.date === 'string' ? parseISO(initialData.date) : initialData.date) : selectedDate || new Date();
-    
-    let defaultStartTime = setMinutes(setHours(new Date(), new Date().getHours() + 1), 0); // Next hour, 00 minutes
-    let defaultEndTime = addHours(defaultStartTime, DEFAULT_DURATION_HOURS);
 
-    if (mode === 'plan-edit' || mode === 'log-edit' || mode === 'plan-to-log') {
-        const baseTimeSource = (mode === 'log-edit' && initialData?.actualStartTime) ? initialData.actualStartTime : initialData?.startTime;
-        if (baseTimeSource) {
-            defaultStartTime = typeof baseTimeSource === 'string' ? parseISO(baseTimeSource) : baseTimeSource;
-        }
-        const baseEndTimeSource = (mode === 'log-edit' && initialData?.actualEndTime) ? initialData.actualEndTime : initialData?.endTime;
-        if (baseEndTimeSource) {
-            defaultEndTime = typeof baseEndTimeSource === 'string' ? parseISO(baseEndTimeSource) : baseEndTimeSource;
-        }
-    }
-    
-    return {
-      title: initialData?.title || "",
-      activityCategoryId: initialData?.activityCategoryId?.toString() || "",
-      taskId: initialData?.taskId?.toString() || "",
-      date: defaultDate,
-      startTime: format(defaultStartTime, "HH:mm"),
-      endTime: format(defaultEndTime, "HH:mm"),
-      notes: initialData?.notes || "",
-    };
-  }
+
+  // 使用useRef跟踪模态框是否已初始化，防止重复初始化
+  const hasInitializedRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen) {
+    // 只在模态框首次打开时或关闭后重新打开时初始化表单
+    if (isOpen && !hasInitializedRef.current) {
       setFormErrors({});
-      let newFormData = { ...getDefaultFormData() }; // Start with general defaults
+      
+      // 获取表单初始值函数
+      const getInitialValues = (): FormData => {
+        const defaultDate = initialData?.date 
+          ? (typeof initialData.date === 'string' ? parseISO(initialData.date) : initialData.date) 
+          : selectedDate || new Date();
+        
+        let defaultStartTime = new Date();
+        let defaultEndTime = addHours(defaultStartTime, DEFAULT_DURATION_HOURS);
 
-      if (initialData) {
-        newFormData.title = initialData.title || "";
-        newFormData.activityCategoryId = initialData.activityCategoryId?.toString() || "";
-        newFormData.taskId = initialData.taskId?.toString() || "";
-        newFormData.notes = initialData.notes || "";
-
-        const dateSource = initialData.date ? (typeof initialData.date === 'string' ? parseISO(initialData.date) : initialData.date) : (selectedDate || new Date());
-        newFormData.date = dateSource;
-
-        if (mode === 'plan-edit') {
-            newFormData.startTime = initialData.startTime ? format(typeof initialData.startTime === 'string' ? parseISO(initialData.startTime) : initialData.startTime, "HH:mm") : format(new Date(), "HH:mm");
-            newFormData.endTime = initialData.endTime ? format(typeof initialData.endTime === 'string' ? parseISO(initialData.endTime) : initialData.endTime, "HH:mm") : format(addHours(new Date(), 1), "HH:mm");
-        } else if (mode === 'log-edit' || mode === 'plan-to-log') {
-            const actualStart = initialData.actualStartTime || initialData.startTime; // Fallback for plan-to-log from just a plan
-            const actualEnd = initialData.actualEndTime || initialData.endTime;
-            newFormData.startTime = actualStart ? format(typeof actualStart === 'string' ? parseISO(actualStart) : actualStart, "HH:mm") : format(new Date(), "HH:mm");
-            newFormData.endTime = actualEnd ? format(typeof actualEnd === 'string' ? parseISO(actualEnd) : actualEnd, "HH:mm") : format(addHours(new Date(), 1), "HH:mm");
-        } else if (mode === 'log-create') {
-             // Default to current time for log-create start, and +1hr for end
-            const now = new Date();
-            newFormData.startTime = format(now, "HH:mm");
-            newFormData.endTime = format(addHours(now, DEFAULT_DURATION_HOURS), "HH:mm");
-        }
-      } else {
-          // Defaults for create modes
+        // 初始化时设置默认时间
+        if (initialData) {
+          // 处理开始时间
+          const timeSource = (mode === 'log-edit' || mode === 'plan-to-log') && initialData.actualStartTime 
+              ? initialData.actualStartTime 
+              : initialData.startTime;
+              
+          if (timeSource) {
+              defaultStartTime = typeof timeSource === 'string' ? parseISO(timeSource) : timeSource;
+          }
+          
+          // 处理结束时间
+          const endTimeSource = (mode === 'log-edit' || mode === 'plan-to-log') && initialData.actualEndTime 
+              ? initialData.actualEndTime 
+              : initialData.endTime;
+              
+          if (endTimeSource) {
+              defaultEndTime = typeof endTimeSource === 'string' ? parseISO(endTimeSource) : endTimeSource;
+          }
+        } else {
+          // 新建模式
           const now = new Date();
-          const defaultStart = setMinutes(setHours(now, now.getHours()), Math.ceil(now.getMinutes()/15)*15); // next 15 min
-          const defaultEnd = addHours(defaultStart, DEFAULT_DURATION_HOURS);
-          newFormData.startTime = format(defaultStart, "HH:mm");
-          newFormData.endTime = format(defaultEnd, "HH:mm");
-          newFormData.date = selectedDate || new Date();
-      }
+          defaultStartTime = setMinutes(setHours(now, now.getHours()), Math.ceil(now.getMinutes()/15)*15); // next 15 min
+          defaultEndTime = addHours(defaultStartTime, DEFAULT_DURATION_HOURS);
+        }
+      
+        return {
+          title: initialData?.title || "",
+          activityCategoryId: initialData?.activityCategoryId?.toString() || "",
+          taskId: initialData?.taskId?.toString() || "",
+          date: defaultDate,
+          startTime: format(defaultStartTime, "HH:mm"),
+          endTime: format(defaultEndTime, "HH:mm"),
+          notes: initialData?.notes || "",
+        };
+      };
+      
+      const newFormData = getInitialValues();
       setFormData(newFormData);
+      hasInitializedRef.current = true;
+      
+      console.log("Modal initialized with:", 
+        newFormData.startTime, 
+        newFormData.endTime, 
+        "Mode:", mode
+      );
+    } else if (!isOpen) {
+      // 当模态框关闭时，重置初始化标志
+      hasInitializedRef.current = false;
     }
-  }, [isOpen, mode, initialData, selectedDate]);
+  }, [isOpen]); // 只在isOpen变化时触发，其他依赖项通过函数闭包访问最新值
 
   const modalConfig = useMemo(() => {
     switch (mode) {
@@ -174,7 +184,11 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    // 直接更新表单值，不做任何自动计算或调整，完全由用户控制
     setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // 打印一下当前修改，以便调试
+    console.log(`InputChange: ${name} = ${value}`);
   };
 
   const handleSelectChange = (name: keyof FormData) => (value: string) => {
@@ -229,9 +243,10 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
     if (!formData.endTime) errors.endTime = "结束时间不能为空。";
     else if (!endDateTime) errors.endTime = "结束时间格式无效。";
 
-    if (startDateTime && endDateTime && endDateTime <= startDateTime) {
-      errors.endTime = "结束时间必须晚于开始时间。";
-    }
+    // 不再强制检查结束时间是否晚于开始时间，允许用户自由设置
+    // 如果需要调试，可以打印一下：
+    // console.log(`Start: ${formData.startTime}, End: ${formData.endTime}`);
+    
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -239,7 +254,10 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
   const handleSubmit = async () => {
     if (!validateForm()) return;
     setIsLoading(true);
-
+    
+    // 打印提交前的表单状态，确认时间没有被修改
+    console.log("FormData at submit:", formData.startTime, formData.endTime);
+    
     const startDateTime = combineDateTime(formData.date, formData.startTime)!;
     const endDateTime = combineDateTime(formData.date, formData.endTime)!;
 

@@ -34,6 +34,7 @@ import { useTaskFiltersAndSort } from "./tasks-view/hooks/useTaskFiltersAndSort"
 import { useTaskSelection } from "./tasks-view/hooks/useTaskSelection";
 import { ActiveTasksDisplay } from "./tasks-view/ActiveTasksDisplay";
 import { Task } from "@/lib/task-utils";
+import { SelectTimeRangeModal } from "./SelectTimeRangeModal";
 
 export function TasksView() {
   // --- Main Data and DB interactions ---
@@ -66,6 +67,10 @@ export function TasksView() {
     dispatchStatsUpdate,
     emptyAllTrashItems, // Placeholder for the new function from useTaskData
     isEmplyingAllTrash, // Placeholder for the new state from useTaskData
+    isSelectTimeModalOpen,
+    setIsSelectTimeModalOpen,
+    taskForTimelineModal,
+    handleConfirmTimeRangeAndAddTask,
   } = useTaskData();
 
   // --- Filtering and Sorting ---
@@ -293,9 +298,7 @@ export function TasksView() {
               selectedTaskIds={selectedTaskIds}
               onClearSelection={clearSelection}
               onOperationComplete={() => {
-                // Data reloading is handled by individual operations in useTaskData or here if necessary
-                // Example: if batch delete calls triggerSoftDelete, it handles reload.
-                // setSelectedTaskIds([]); // Already done by clearSelection
+                loadTasks();
                 dispatchStatsUpdate(); // General update for stats
               }}
               className="mb-4"
@@ -381,6 +384,13 @@ export function TasksView() {
         title="确认永久删除任务"
         description="您确定要永久删除此任务吗？此操作无法撤销。"
         onConfirm={confirmPermanentDeleteTask}
+      />
+
+      <SelectTimeRangeModal
+        isOpen={isSelectTimeModalOpen}
+        onOpenChange={setIsSelectTimeModalOpen}
+        task={taskForTimelineModal}
+        onConfirm={handleConfirmTimeRangeAndAddTask}
       />
 
         {/* Optional: Global loading overlay for operations like batch updates if not handled by button states */}
