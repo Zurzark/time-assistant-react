@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { TagInput } from "@/components/ui/tag-input";
 
 interface UnifiedAddModalProps {
   open: boolean;
@@ -45,7 +46,7 @@ export function UnifiedAddModal({
   // 收集箱条目表单状态
   const [ideaContent, setIdeaContent] = useState("");
   const [ideaNotes, setIdeaNotes] = useState("");
-  const [ideaTags, setIdeaTags] = useState("");
+  const [ideaTags, setIdeaTags] = useState<string[]>([]);
   const [isSubmittingIdea, setIsSubmittingIdea] = useState(false);
 
   const resetTaskForm = useCallback(() => {
@@ -56,7 +57,7 @@ export function UnifiedAddModal({
     setIdeaFormKey(`idea-form-${Date.now()}`);
     setIdeaContent("");
     setIdeaNotes("");
-    setIdeaTags("");
+    setIdeaTags([]);
   }, []);
 
   const resetProjectForm = useCallback(() => {
@@ -240,7 +241,7 @@ export function UnifiedAddModal({
       const newItem: Omit<InboxItem, "id"> = {
         content: ideaContent.trim(),
         notes: ideaNotes.trim() || undefined,
-        tags: ideaTags.trim() ? ideaTags.split(",").map(tag => tag.trim()) : undefined,
+        tags: ideaTags.length > 0 ? ideaTags : undefined,
         createdAt: new Date(),
         updatedAt: new Date(),
         status: "unprocessed"
@@ -386,12 +387,11 @@ export function UnifiedAddModal({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="idea-tags">标签（可选，用逗号分隔）</Label>
-                    <Input
-                      id="idea-tags"
+                    <Label htmlFor="idea-tags">标签（可选）</Label>
+                    <TagInput
                       value={ideaTags}
-                      onChange={(e) => setIdeaTags(e.target.value)}
-                      placeholder="例如：想法, 工作, 家庭..."
+                      onChange={setIdeaTags}
+                      placeholder="添加标签..."
                     />
                   </div>
                   <div className="flex justify-end space-x-2 pt-6">

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { addInboxItem, InboxItem } from "@/lib/db"
+import { TagInput } from "@/components/ui/tag-input"
 
 interface AddInboxItemDialogProps {
   open: boolean
@@ -18,7 +19,7 @@ interface AddInboxItemDialogProps {
 export function AddInboxItemDialog({ open, onOpenChange, onItemAdded }: AddInboxItemDialogProps) {
   const [content, setContent] = useState("")
   const [notes, setNotes] = useState("")
-  const [tags, setTags] = useState("")
+  const [tags, setTags] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,7 +33,7 @@ export function AddInboxItemDialog({ open, onOpenChange, onItemAdded }: AddInbox
       const newItem: Omit<InboxItem, "id"> = {
         content: content.trim(),
         notes: notes.trim() || undefined,
-        tags: tags.trim() ? tags.split(",").map(tag => tag.trim()) : undefined,
+        tags: tags.length > 0 ? tags : undefined,
         createdAt: new Date(),
         updatedAt: new Date(),
         status: "unprocessed"
@@ -43,7 +44,7 @@ export function AddInboxItemDialog({ open, onOpenChange, onItemAdded }: AddInbox
       // 重置表单
       setContent("")
       setNotes("")
-      setTags("")
+      setTags([])
       
       // 关闭对话框
       onOpenChange(false)
@@ -88,12 +89,11 @@ export function AddInboxItemDialog({ open, onOpenChange, onItemAdded }: AddInbox
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="tags">标签（可选，用逗号分隔）</Label>
-            <Input
-              id="tags"
+            <Label htmlFor="tags">标签（可选）</Label>
+            <TagInput
               value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="例如：想法, 工作, 家庭..."
+              onChange={setTags}
+              placeholder="添加标签..."
             />
           </div>
           <DialogFooter>

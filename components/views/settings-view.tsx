@@ -62,6 +62,8 @@ import {
 
 // ActivityCategorySettings component will be imported below
 import { ActivityCategorySettings } from "./settings/activity-category-settings";
+import { DataManagementSettings } from "./settings/data-management-settings";
+import { TagManagementSettings } from "./settings/tag-management-settings";
 
 
 // 定义标签颜色的类型
@@ -168,13 +170,6 @@ export function SettingsView() {
   const [workDays, setWorkDays] = useState<string[]>(["monday", "tuesday", "wednesday", "thursday", "friday"])
   const [workStartTime, setWorkStartTime] = useState<{ hour: number; minute: number }>({ hour: 9, minute: 0 })
   const [workEndTime, setWorkEndTime] = useState<{ hour: number; minute: number }>({ hour: 18, minute: 0 })
-  const [tagColors, setTagColors] = useState<TagColors>({
-    工作: "#ef4444",
-    学习: "#3b82f6",
-    个人: "#10b981",
-    家庭: "#f59e0b",
-    健康: "#8b5cf6",
-  })
   const { toast } = useToast(); 
 
   const [fixedBreakRules, setFixedBreakRules] = useState<FixedBreakRule[]>([]);
@@ -243,29 +238,6 @@ export function SettingsView() {
       setWorkDays(workDays.filter((d) => d !== day))
     } else {
       setWorkDays([...workDays, day])
-    }
-  }
-
-  const handleDeleteTag = (tag: string) => {
-    const newTagColors = { ...tagColors }
-    delete newTagColors[tag]
-    setTagColors(newTagColors)
-  }
-
-  const handleTagColorChange = (tag: string, color: string) => {
-    setTagColors({
-      ...tagColors,
-      [tag]: color,
-    })
-  }
-
-  const handleAddTag = () => {
-    const newTag = prompt("请输入新标签名称")
-    if (newTag && !tagColors[newTag]) {
-      setTagColors({
-        ...tagColors,
-        [newTag]: "#64748b", // Default color
-      })
     }
   }
 
@@ -1223,70 +1195,12 @@ export function SettingsView() {
 
               {/* Data Management */}
               {activeTab === "data" && (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">数据导入</h3>
-                    <div className="grid gap-2">
-                      <Label htmlFor="data-import">导入数据文件</Label>
-                      <Input id="data-import" type="file" />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">数据导出</h3>
-                    <div className="grid gap-2">
-                      <Label htmlFor="data-export">导出数据文件</Label>
-                      <Button id="data-export">导出</Button>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">数据清理</h3>
-                    <div className="grid gap-2">
-                      <Label htmlFor="data-cleanup">清理旧数据</Label>
-                      <Button id="data-cleanup">清理</Button>
-                    </div>
-                  </div>
-                </div>
+                <DataManagementSettings toast={toast} />
               )}
 
               {/* Tag Management */}
               {activeTab === "tags" && (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">标签颜色设置</h3>
-                    <div className="grid gap-4">
-                      {Object.entries(tagColors).map(([tag, color]) => (
-                        <div key={tag} className="flex items-center justify-between">
-                          <Label htmlFor={tag}>{tag}</Label>
-                          <input
-                            type="color"
-                            id={tag}
-                            defaultValue={color}
-                            className="w-10 h-10 rounded-md border cursor-pointer"
-                            onChange={(e) => handleTagColorChange(tag, e.target.value)}
-                          />
-                          <Button size="sm" onClick={() => handleDeleteTag(tag)}>
-                            删除
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">添加新标签</h3>
-                    <div className="grid gap-2">
-                      <Button onClick={handleAddTag}>添加标签</Button>
-                    </div>
-                  </div>
-                </div>
+                <TagManagementSettings toast={toast} />
               )}
 
               {/* Activity Category Management - Replaced with new component */}

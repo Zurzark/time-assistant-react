@@ -21,6 +21,7 @@ import {
   serializeRecurrenceRule, 
   getRecurrenceDescription 
 } from '@/lib/recurrence-utils';
+import { TagInput } from "@/components/ui/tag-input";
 
 // Priority type, consistent with UIPriority used elsewhere
 // Export this type so it can be imported by other components like EditTaskDialog
@@ -351,13 +352,12 @@ export function TaskFormFields({
           </Select>
         </div>
         <div className="grid gap-2">
-            <Label htmlFor={`task-tags-${initialData?.title || 'new'}`}>标签 (逗号分隔)</Label>
-            <Input 
-                id={`task-tags-${initialData?.title || 'new'}`}
-                placeholder="例如: 工作,个人"
-                value={tags.join(", ")}
-                onChange={(e) => setTags(e.target.value.split(",").map(tag => tag.trim()).filter(tag => tag))}
-            />
+          <Label htmlFor={`task-tags-${initialData?.title || 'new'}`}>标签</Label>
+          <TagInput
+            value={tags}
+            onChange={setTags}
+            placeholder="添加标签..."
+          />
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
