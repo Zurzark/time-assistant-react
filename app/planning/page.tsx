@@ -1,5 +1,10 @@
-import { PlanningView } from "@/components/views/planning-view"
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { PlanningView } from "@/components/views/planning-view";
 
 export default function PlanningPage() {
-  return <PlanningView />
+  return (
+    <SidebarProvider>
+      <PlanningView />
+    </SidebarProvider>
+  );
 }

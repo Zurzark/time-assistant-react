@@ -33,9 +33,16 @@ import {
     Undo,
     CalendarDays,
     Hourglass, // 用于等待中
+    Repeat, // 新增：用于重复任务指示
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, isPast, isToday, differenceInDays, startOfDay, isFuture } from 'date-fns';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 interface TaskItemProps {
     task: Task;
@@ -84,6 +91,26 @@ const TaskCategoryDisplay: React.FC<{ category: TaskCategory | undefined }> = ({
             {style.icon}
             <span className="ml-1">{style.text}</span>
         </Badge>
+    );
+};
+
+// 新增：重复任务指示组件
+const RecurringTaskIndicator: React.FC<{ task: Task }> = ({ task }) => {
+    if (!task.isRecurring) return null;
+    
+    return (
+        <TooltipProvider>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <span className="inline-flex items-center ml-1.5 text-gray-500 dark:text-gray-400">
+                        <Repeat className="h-3.5 w-3.5" />
+                    </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                    <p>重复任务</p>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
     );
 };
 
@@ -188,16 +215,25 @@ export function TaskItem({
                         <div className="flex items-center justify-between">
                             <div className="flex items-center min-w-0"> {/* Added min-w-0 for truncation */} 
                                 {task.completed && <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" />}
-                                <h3
-                                    className={cn(
-                                        "text-base font-semibold text-gray-800 dark:text-gray-100 truncate", // Added truncate
-                                        task.completed && "line-through text-gray-500 dark:text-gray-400",
+                                <div className="flex items-center min-w-0 flex-1">
+                                    <h3
+                                        className={cn(
+                                            "text-base font-semibold text-gray-800 dark:text-gray-100 truncate",
+                                            task.completed && "line-through text-gray-500 dark:text-gray-400",
+                                        )}
+                                        title={task.title}
+                                    >
+                                        {task.isFrog && <span role="img" aria-label="frog" className="mr-1">🐸</span>}
+                                        {task.title}
+                                    </h3>
+                                    <RecurringTaskIndicator task={task} />
+                                    {task.description && (
+                                        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
+                                            <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
+                                            {task.description}
+                                        </span>
                                     )}
-                                    title={task.title} // Added title attribute for full text on hover
-                                >
-                                    {task.isFrog && <span role="img" aria-label="frog" className="mr-1">🐸</span>}
-                                    {task.title}
-                                    {/* "即将到期" (1-2 days away) visual cue - Moved to be next to title */}
+                                    {/* "即将到期" (1-2 days away) visual cue */}
                                     {task.dueDate && !task.completed && !isOverdue && (() => {
                                         const today = startOfDay(new Date());
                                         const dueDateObj = new Date(task.dueDate);
@@ -205,7 +241,7 @@ export function TaskItem({
                                         
                                         if (isFuture(dueDateStart) || isToday(dueDateStart)) {
                                             const daysDiff = differenceInDays(dueDateStart, today);
-                                            if (daysDiff >= 0 && daysDiff <= 2) { // Today, Tomorrow or Day after tomorrow
+                                            if (daysDiff >= 0 && daysDiff <= 2) {
                                                 return (
                                                     <Badge
                                                         variant="outline"
@@ -218,7 +254,7 @@ export function TaskItem({
                                         }
                                         return null;
                                     })()}
-                                </h3>
+                                </div>
                             </div>
                             <div className="flex items-center space-x-1 flex-shrink-0" data-no-edit-on-click="true">
                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-sky-400" onClick={handlePomodoro} title="启动番茄钟">
@@ -256,13 +292,6 @@ export function TaskItem({
                                 </DropdownMenu>
                             </div>
                         </div>
-
-                        {/* Second Row: Description (Optional) */} 
-                        {task.description && (
-                            <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                                {task.description}
-                            </p>
-                        )}
 
                         {/* Third Row: Attributes & Metadata */} 
                         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400 pt-0.5">
@@ -360,16 +389,19 @@ export function TaskItem({
                         <div className="flex items-center justify-between">
                              <div className="flex items-center min-w-0"> {/* Added min-w-0 */} 
                                 {task.completed && <Check className="h-4 w-4 text-green-500 mr-1.5 flex-shrink-0" />}
-                                <h3
-                                    className={cn(
-                                        "text-sm font-medium text-gray-800 dark:text-gray-100 truncate", // Added truncate
-                                        task.completed && "line-through text-gray-500 dark:text-gray-400",
-                                    )}
-                                    title={task.title} // Added title attribute
-                                >
-                                    {task.isFrog && <span role="img" aria-label="frog" className="mr-1">🐸</span>}
-                                    {task.title}
-                                </h3>
+                                <div className="flex items-center min-w-0 flex-1">
+                                    <h3
+                                        className={cn(
+                                            "text-sm font-medium text-gray-800 dark:text-gray-100 truncate",
+                                            task.completed && "line-through text-gray-500 dark:text-gray-400",
+                                        )}
+                                        title={task.title}
+                                    >
+                                        {task.isFrog && <span role="img" aria-label="frog" className="mr-1">🐸</span>}
+                                        {task.title}
+                                    </h3>
+                                    <RecurringTaskIndicator task={task} />
+                                </div>
                             </div>
                             <div className="flex items-center flex-shrink-0" data-no-edit-on-click="true">
                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-sky-400" onClick={handlePomodoro} title="启动番茄钟">
@@ -408,9 +440,10 @@ export function TaskItem({
                         </div>
                         
                         {task.description && (
-                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-1">
+                            <span className="ml-1.5 text-xs text-gray-500 dark:text-gray-400 truncate max-w-[150px]">
+                                <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
                                 {task.description}
-                            </p>
+                            </span>
                         )}
 
                         <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs">
@@ -429,28 +462,6 @@ export function TaskItem({
                                     <Calendar className="h-3 w-3 mr-1" />
                                     {format(new Date(task.dueDate), 'MM/dd')} (截止)
                                     
-                                    {/* "即将到期" (1-2 days away) visual cue - REMOVED FROM HERE */}
-                                    {/* {task.dueDate && !task.completed && !isOverdue && (() => {
-                                        const today = startOfDay(new Date());
-                                        const dueDateObj = new Date(task.dueDate);
-                                        const dueDateStart = startOfDay(dueDateObj);
-
-                                        if (isFuture(dueDateStart) || isToday(dueDateStart)) {
-                                            const daysDiff = differenceInDays(dueDateStart, today);
-                                            if (daysDiff === 1 || daysDiff === 2) {
-                                                return (
-                                                    <Badge
-                                                        variant="outline"
-                                                        className="ml-1 !text-xs border-orange-500 text-orange-600 bg-orange-50 dark:border-orange-400 dark:text-orange-300 dark:bg-orange-900/40 px-1 py-0"
-                                                    >
-                                                        即将到期
-                                                    </Badge>
-                                                );
-                                            }
-                                        }
-                                        return null;
-                                    })()} */}
-
                                     {isToday(new Date(task.dueDate)) && !task.completed && !isOverdue && <span className="ml-1 font-medium text-blue-600 dark:text-blue-400">(今日)</span>}
                                 </Badge>
                             )}

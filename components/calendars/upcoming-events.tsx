@@ -44,8 +44,8 @@ export function UpcomingEvents({
     if (block.sourceType === 'fixed_break') {
       text = "固定休息";
       className = "bg-gray-100 text-gray-700 dark:bg-gray-700/30 dark:text-gray-300";
-    } else if (block.isLogged === 0) {
-      text = "计划中";
+    } else if (block.sourceType === 'task_plan' || block.sourceType === 'task_plan_manual' || block.isLogged === 0) {
+      text = "计划";
       className = "bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-300";
     } else if (block.isLogged === 1) {
       text = "已记录";

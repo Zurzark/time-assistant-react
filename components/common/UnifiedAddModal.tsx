@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ObjectStores, add, getAll, Project as DBProject, Task as DBTask, Goal as DBGoal, ActivityCategory } from "@/lib/db";
+import { ObjectStores, add, getAll, Project as DBProject, Task as DBTask, Goal as DBGoal, ActivityCategory, InboxItem } from "@/lib/db";
 import { NO_PROJECT_VALUE, toDBTaskShape } from "@/lib/task-utils";
 import { UIPriority, TaskCategory as UtilTaskCategory } from "../task/TaskFormFields";
 import { TaskFormFields, TaskFormData } from "../task/TaskFormFields";
@@ -12,6 +12,10 @@ import { ProjectFormFields, ProjectFormData } from "../project/ProjectFormFields
 import { GoalFormFields, GoalFormData } from "../goal/GoalFormFields";
 import { Task as TaskUtilsTask } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 
 interface UnifiedAddModalProps {
   open: boolean;
@@ -34,11 +38,25 @@ export function UnifiedAddModal({
   const [availableActivityCategories, setAvailableActivityCategories] = useState<ActivityCategory[]>([]);
   
   const [taskFormKey, setTaskFormKey] = useState(() => `task-form-${Date.now()}`);
+  const [ideaFormKey, setIdeaFormKey] = useState(() => `idea-form-${Date.now()}`);
   const [projectFormKey, setProjectFormKey] = useState(() => `project-form-${Date.now()}`);
   const [goalFormKey, setGoalFormKey] = useState(() => `goal-form-${Date.now()}`);
 
+  // 收集箱条目表单状态
+  const [ideaContent, setIdeaContent] = useState("");
+  const [ideaNotes, setIdeaNotes] = useState("");
+  const [ideaTags, setIdeaTags] = useState("");
+  const [isSubmittingIdea, setIsSubmittingIdea] = useState(false);
+
   const resetTaskForm = useCallback(() => {
     setTaskFormKey(`task-form-${Date.now()}`);
+  }, []);
+
+  const resetIdeaForm = useCallback(() => {
+    setIdeaFormKey(`idea-form-${Date.now()}`);
+    setIdeaContent("");
+    setIdeaNotes("");
+    setIdeaTags("");
   }, []);
 
   const resetProjectForm = useCallback(() => {
@@ -73,12 +91,13 @@ export function UnifiedAddModal({
       } else {
         resetTaskForm();
       }
+      resetIdeaForm();
       resetProjectForm();
       resetGoalForm();
     } else {
       clearEditingTask?.();
     }
-  }, [open, editingTask, resetTaskForm, resetProjectForm, resetGoalForm, clearEditingTask]);
+  }, [open, editingTask, resetTaskForm, resetIdeaForm, resetProjectForm, resetGoalForm, clearEditingTask]);
 
   const handleCreateNewProjectForTaskForm = async (name: string): Promise<number | undefined> => {
     const now = new Date();
@@ -207,6 +226,40 @@ export function UnifiedAddModal({
     }
   };
 
+  const handleSaveIdea = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    
+    if (!ideaContent.trim()) {
+      toast.error("内容不能为空");
+      return;
+    }
+    
+    setIsSubmittingIdea(true);
+    
+    try {
+      const newItem: Omit<InboxItem, "id"> = {
+        content: ideaContent.trim(),
+        notes: ideaNotes.trim() || undefined,
+        tags: ideaTags.trim() ? ideaTags.split(",").map(tag => tag.trim()) : undefined,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        status: "unprocessed"
+      };
+      
+      await add(ObjectStores.INBOX_ITEMS, newItem);
+      
+      toast.success("想法已成功添加到收集篮！", { duration: 6000 });
+      resetIdeaForm();
+      onSuccessfulCreate?.();
+      onOpenChange(false);
+    } catch (error) {
+      console.error("Failed to save idea:", error);
+      toast.error("添加想法失败。");
+    } finally {
+      setIsSubmittingIdea(false);
+    }
+  };
+
   const handleSaveProject = async (projectData: ProjectFormData) => {
     const now = new Date();
     const newProject: Omit<DBProject, 'id'> = {
@@ -266,6 +319,7 @@ export function UnifiedAddModal({
 
   const handleCancel = () => {
     if (activeTab === "task") resetTaskForm();
+    if (activeTab === "idea") resetIdeaForm();
     if (activeTab === "project") resetProjectForm();
     if (activeTab === "goal") resetGoalForm();
     onOpenChange(false);
@@ -281,12 +335,13 @@ export function UnifiedAddModal({
         <DialogHeader>
           <DialogTitle>{editingTask ? "编辑任务" : "添加新内容"}</DialogTitle>
           <DialogDescription>
-            {editingTask ? `正在编辑任务: ${editingTask.title}` : "快速添加新的任务、项目或目标。"}
+            {editingTask ? `正在编辑任务: ${editingTask.title}` : "快速添加新的任务、想法、项目或目标。"}
           </DialogDescription>
         </DialogHeader>
         <Tabs value={editingTask ? "task" : activeTab} onValueChange={setActiveTab} className="w-full pt-2">
-          <TabsList className={cn("grid w-full", editingTask ? "grid-cols-1" : "grid-cols-3")}>
+          <TabsList className={cn("grid w-full", editingTask ? "grid-cols-1" : "grid-cols-4")}>
             <TabsTrigger value="task">{editingTask ? "任务详情" : "任务"}</TabsTrigger>
+            {!editingTask && <TabsTrigger value="idea">想法</TabsTrigger>}
             {!editingTask && <TabsTrigger value="project">项目</TabsTrigger>}
             {!editingTask && <TabsTrigger value="goal">目标</TabsTrigger>}
           </TabsList>
@@ -308,6 +363,47 @@ export function UnifiedAddModal({
           </TabsContent>
           {!editingTask && (
             <>
+              <TabsContent value="idea" className="mt-4">
+                <form key={ideaFormKey} onSubmit={handleSaveIdea} className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="idea-content">内容 <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="idea-content"
+                      value={ideaContent}
+                      onChange={(e) => setIdeaContent(e.target.value)}
+                      placeholder="输入想法或待办事项..."
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="idea-notes">备注（可选）</Label>
+                    <Textarea
+                      id="idea-notes"
+                      value={ideaNotes}
+                      onChange={(e) => setIdeaNotes(e.target.value)}
+                      placeholder="添加更多详细信息..."
+                      rows={4}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="idea-tags">标签（可选，用逗号分隔）</Label>
+                    <Input
+                      id="idea-tags"
+                      value={ideaTags}
+                      onChange={(e) => setIdeaTags(e.target.value)}
+                      placeholder="例如：想法, 工作, 家庭..."
+                    />
+                  </div>
+                  <div className="flex justify-end space-x-2 pt-6">
+                    <Button type="button" variant="outline" onClick={handleCancel}>
+                      取消
+                    </Button>
+                    <Button type="submit" disabled={isSubmittingIdea || !ideaContent.trim()}>
+                      {isSubmittingIdea ? "保存中..." : "保存到收集篮"}
+                    </Button>
+                  </div>
+                </form>
+              </TabsContent>
               <TabsContent value="project" className="mt-4">
                 <ProjectFormFields
                   key={projectFormKey}

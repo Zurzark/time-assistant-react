@@ -168,6 +168,30 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
     durationText = formatDurationFromMinutes(block.durationMinutes);
   }
 
+  const getStatusCapsule = (block: UITimeBlock) => {
+    let text = "";
+    let className = "";
+
+    if (block.sourceType === 'fixed_break') {
+      text = "固定休息";
+      className = "bg-gray-100 text-gray-700 dark:bg-gray-700/30 dark:text-gray-300";
+    } else if (block.sourceType === 'task_plan' || block.sourceType === 'task_plan_manual' || !block.isLogged) {
+      text = "计划";
+      className = "bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-300";
+    } else if (block.isLogged) {
+      text = "已记录";
+      className = "bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-300";
+    }
+
+    if (!text) return null;
+
+    return (
+      <Badge className={cn("text-xs px-1.5 py-0.5 whitespace-nowrap leading-tight h-5", className)}>
+        {text}
+      </Badge>
+    );
+  };
+
   return (
     // mb-3 is removed because parent div now has pb-6
     // flex items-start group is kept
@@ -227,19 +251,7 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
           <div className="flex items-end justify-between text-xs mt-auto min-h-[1.75rem]"> {/* Adjusted min-h from 2rem to 1.75rem (28px) */}
             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 overflow-hidden mr-1"> {/* Adjusted gap-y from 1 to 0.5 (2px) */}
               {/* 视觉区分：计划 vs 已记录 (需求 四.1 - 方案B) */} 
-              {block.isLogged ? (
-                <Badge className="bg-green-100 text-green-800 dark:bg-green-700/50 dark:text-green-200 py-0.5 px-1.5 text-[0.68rem] leading-tight rounded shadow-xs"> {/* Unified py-0.5 and rounded */}
-                    <CheckCircle2 className="h-3 w-3 mr-1" /> 已记录
-                </Badge>
-              ) : block.sourceType === 'fixed_break' ? (
-                <div className="inline-flex items-center rounded border border-green-500 dark:border-green-600 px-2 py-0.5 text-xs font-semibold text-green-600 dark:text-green-400"> {/* Changed rounded-full to rounded */}
-                    <Clock className="h-3 w-3 mr-1" /> 固定休息
-                </div>
-              ) : (
-                <Badge className="bg-blue-100 text-blue-600 dark:bg-blue-800/60 dark:text-blue-300 py-0.5 px-1.5 text-[0.68rem] leading-tight rounded shadow-xs">
-                    <Clock className="h-3 w-3 mr-1" /> 计划中
-                </Badge>
-              )}
+              {getStatusCapsule(block)}
 
               {category && (
                 <Badge

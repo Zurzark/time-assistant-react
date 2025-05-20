@@ -1,7 +1,7 @@
 // IndexedDB 数据库实现
 // 定义数据库名称和版本号
 const DB_NAME = 'FocusPilotDB';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 // 定义对象存储名称
 export enum ObjectStores {
@@ -19,6 +19,7 @@ export enum ObjectStores {
   TIME_BLOCKS = 'timeBlocks',
   FIXED_BREAK_RULES = 'fixedBreakRules',
   ACTIVITY_CATEGORIES = 'activityCategories',
+  INBOX_ITEMS = 'inboxItems',
 }
 
 // 定义打开数据库的接口
@@ -309,6 +310,28 @@ export const openDB = (): Promise<IDBResult> => {
           // IndexedDB 是 schemaless 的，所以不需要在 onupgradeneeded 中显式添加列。
           // 只需要更新 Task 接口，并在应用代码中写入时包含这个字段。
           console.log('TASKS 存储结构已按版本 7 要求评估（defaultActivityCategoryId 为可选字段，接口层面处理）。');
+        }
+
+        // 版本 8: 添加 INBOX_ITEMS 对象存储
+        if (oldVersion < 8) {
+          console.log(`数据库从版本 ${oldVersion} 升级到版本 8: 添加 INBOX_ITEMS 对象存储`);
+          
+          // 创建收集篮条目存储
+          if (!db.objectStoreNames.contains(ObjectStores.INBOX_ITEMS)) {
+            const inboxItemsStore = db.createObjectStore(ObjectStores.INBOX_ITEMS, { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            
+            // 创建索引
+            inboxItemsStore.createIndex('byContent', 'content', { unique: false });
+            inboxItemsStore.createIndex('byCreatedAt', 'createdAt', { unique: false });
+            inboxItemsStore.createIndex('byStatus', 'status', { unique: false });
+            inboxItemsStore.createIndex('byRelatedTaskId', 'relatedTaskId', { unique: false });
+            inboxItemsStore.createIndex('byRelatedGoalId', 'relatedGoalId', { unique: false });
+            
+            console.log('创建收集篮条目存储及其索引');
+          }
         }
       };
     } catch (error) {
@@ -941,4 +964,179 @@ export const getLoggedTimeBlocksByDateRange = (startDate: string, endDate: strin
       reject(new Error('事务执行失败: 按日期范围查询已记录的时间块'));
     };
   });
+};
+
+// 收集篮条目接口定义
+export interface InboxItem {
+  id?: number;
+  content: string; // 主要内容
+  notes?: string; // 可选的详细备注
+  tags?: string[]; // 可选的标签
+  createdAt: Date; // 创建时间
+  updatedAt: Date; // 更新时间
+  status: 'unprocessed' | 'processed_to_task' | 'processed_to_goal' | 'someday_maybe' | 'archived' | 'deleted'; // 状态
+  relatedTaskId?: number; // 关联的任务ID（如果已转化为任务）
+  relatedGoalId?: number; // 关联的目标ID（如果已转化为目标）
+}
+
+// 获取所有未处理的收集篮条目
+export const getUnprocessedInboxItems = (): Promise<InboxItem[]> => {
+  return getByIndex<InboxItem>(ObjectStores.INBOX_ITEMS, 'byStatus', 'unprocessed');
+};
+
+// 添加新的收集篮条目
+export const addInboxItem = (inboxItemData: Omit<InboxItem, 'id'>): Promise<number> => {
+  return add<Omit<InboxItem, 'id'>>(ObjectStores.INBOX_ITEMS, inboxItemData);
+};
+
+// 更新收集篮条目
+export const updateInboxItem = (inboxItemData: InboxItem): Promise<boolean> => {
+  return update<InboxItem>(ObjectStores.INBOX_ITEMS, inboxItemData);
+};
+
+// 删除收集篮条目
+export const deleteInboxItem = (inboxItemId: number): Promise<boolean> => {
+  return remove(ObjectStores.INBOX_ITEMS, inboxItemId);
+};
+
+// 批量更新收集篮条目状态
+export const updateInboxItemsStatus = async (
+  itemIds: number[], 
+  status: InboxItem['status'],
+  relatedId?: { taskId?: number, goalId?: number }
+): Promise<boolean> => {
+  try {
+    const { db, error } = await openDB();
+    
+    if (error || !db) {
+      throw error || new Error('无法打开数据库');
+    }
+    
+    const transaction = db.transaction(ObjectStores.INBOX_ITEMS, 'readwrite');
+    const store = transaction.objectStore(ObjectStores.INBOX_ITEMS);
+    
+    // 使用Promise.all等待所有更新完成
+    await Promise.all(itemIds.map(async (id) => {
+      const request = store.get(id);
+      
+      return new Promise<void>((resolve, reject) => {
+        request.onsuccess = () => {
+          const item = request.result as InboxItem;
+          if (item) {
+            item.status = status;
+            item.updatedAt = new Date();
+            
+            // 如果提供了关联ID，则更新
+            if (relatedId?.taskId) {
+              item.relatedTaskId = relatedId.taskId;
+            }
+            if (relatedId?.goalId) {
+              item.relatedGoalId = relatedId.goalId;
+            }
+            
+            const updateRequest = store.put(item);
+            updateRequest.onsuccess = () => resolve();
+            updateRequest.onerror = () => reject(new Error('更新收集篮条目状态失败'));
+          } else {
+            resolve(); // 如果找不到项目，则跳过
+          }
+        };
+        request.onerror = () => reject(new Error('获取收集篮条目失败'));
+      });
+    }));
+    
+    db.close();
+    return true;
+  } catch (error) {
+    console.error('批量更新收集篮条目状态时出错:', error);
+    return false;
+  }
+};
+
+// 获取最近的收集篮条目（例如过去7天内创建的）
+export const getRecentInboxItems = (): Promise<InboxItem[]> => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const { db, error } = await openDB();
+      
+      if (error || !db) {
+        reject(error || new Error('无法打开数据库'));
+        return;
+      }
+      
+      const transaction = db.transaction(ObjectStores.INBOX_ITEMS, 'readonly');
+      const store = transaction.objectStore(ObjectStores.INBOX_ITEMS);
+      
+      // 获取7天前的日期
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const index = store.index('byCreatedAt');
+      const range = IDBKeyRange.lowerBound(sevenDaysAgo);
+      
+      const request = index.openCursor(range);
+      const results: InboxItem[] = [];
+      
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          const item = cursor.value as InboxItem;
+          if (item.status === 'unprocessed') {
+            results.push(item);
+          }
+          cursor.continue();
+        } else {
+          resolve(results);
+        }
+      };
+      
+      request.onerror = () => {
+        reject(new Error('获取最近收集篮条目失败'));
+      };
+      
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error('获取最近收集篮条目时发生未知错误'));
+    }
+  });
+};
+
+// 清空所有未处理的收集篮条目（标记为deleted或物理删除）
+export const clearUnprocessedInboxItems = async (shouldPhysicalDelete: boolean = false): Promise<boolean> => {
+  try {
+    const unprocessedItems = await getUnprocessedInboxItems();
+    const itemIds = unprocessedItems.map(item => item.id!);
+    
+    if (shouldPhysicalDelete) {
+      // 物理删除
+      const { db, error } = await openDB();
+      
+      if (error || !db) {
+        throw error || new Error('无法打开数据库');
+      }
+      
+      const transaction = db.transaction(ObjectStores.INBOX_ITEMS, 'readwrite');
+      const store = transaction.objectStore(ObjectStores.INBOX_ITEMS);
+      
+      await Promise.all(itemIds.map(id => 
+        new Promise<void>((resolve, reject) => {
+          const request = store.delete(id);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(new Error(`删除收集篮条目 ${id} 失败`));
+        })
+      ));
+      
+      db.close();
+    } else {
+      // 标记为deleted
+      await updateInboxItemsStatus(itemIds, 'deleted');
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('清空未处理收集篮条目时出错:', error);
+    return false;
+  }
 };
