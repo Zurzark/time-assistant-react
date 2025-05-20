@@ -163,13 +163,13 @@ export function TodayDashboard() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[calc(100vh-250px)]">
+          <div className="lg:col-span-2 flex flex-col gap-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <TaskStatsCard timeRange={timeRange} setTimeRange={setTimeRange} />
               <FrogTasksCard onPomodoroClick={handlePomodoroClick} />
             </div>
-            <div>
+            <div className="flex-grow flex flex-col min-h-0">
               <TodayFocusTasks
                 key={todayFocusRefreshKey}
                 refreshTrigger={todayFocusRefreshKey}
@@ -184,7 +184,7 @@ export function TodayDashboard() {
             </div>
           </div>
 
-          <div className="lg:col-span-1 h-full">
+          <div className="lg:col-span-1 flex flex-col min-h-0">
             <TimelineCard onPomodoroClick={handlePomodoroClick} />
           </div>
         </div>

@@ -28,6 +28,7 @@ interface CalendarsProps {
   calendars: CalendarGroup[];
 }
 
+// 该组件用于展示和管理日历组及其条目，允许用户通过可折叠的侧边栏菜单进行交互。
 export function Calendars({ calendars }: CalendarsProps) {
   return (
     <div className="space-y-2">
@@ -43,13 +44,12 @@ export function Calendars({ calendars }: CalendarsProps) {
             <CollapsibleContent>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {calendar.items.map((item: CalendarItem, index: number) => ( // 假设 item 是对象，key应该是唯一的，比如 item.id。如果 item 是 string，则 key={item}
-                    <SidebarMenuItem key={item.id || item.name || index}> 
+                  {calendar.items.map((item: CalendarItem, index: number) => (
+                    <SidebarMenuItem key={typeof item === 'object' && item !== null ? (item.id || item.name || index) : (String(item) || index)}>
                       <SidebarMenuButton asChild>
                         <a href="#">
                           <CheckSquare className="h-4 w-4" />
-                          {/* 假设 item 有一个可显示的属性，如 name 或直接是 item 本身（如果是字符串） */}
-                          <span>{item.name || item}</span> 
+                          <span>{typeof item === 'object' && item !== null ? (item.name || `Calendar Item ${index + 1}`) : String(item)}</span>
                         </a>
                       </SidebarMenuButton>
                     </SidebarMenuItem>

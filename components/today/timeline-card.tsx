@@ -19,7 +19,8 @@ import {
   Edit3,
   PlusCircle,
   Timer,
-  Tag as CategoryIcon
+  Tag as CategoryIcon,
+  Plus
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -114,11 +115,12 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     setError(null);
 
     try {
-      const todayStartUTC = new Date(currentFreshTodayDateString + 'T00:00:00.000Z');
-      const todayEndUTC = new Date(currentFreshTodayDateString + 'T23:59:59.999Z');
-      
       const localDateParts = currentFreshTodayDateString.split('-').map(Number);
-      const localTodayStart = new Date(localDateParts[0], localDateParts[1] - 1, localDateParts[2], 0, 0, 0, 0);
+      const localTodayZero = new Date(localDateParts[0], localDateParts[1] - 1, localDateParts[2], 0, 0, 0, 0);
+      
+      const displayPeriodStart = new Date(localTodayZero);
+      const displayPeriodEnd = new Date(localDateParts[0], localDateParts[1] - 1, localDateParts[2], 23, 59, 59, 999);
+      const displayPeriodStartNextDay = addDays(displayPeriodStart, 1);
 
       const [allFixedRules, categories, dbTasks] = await Promise.all([
         getAllDB<FixedBreakRule>(ObjectStores.FIXED_BREAK_RULES),
@@ -128,12 +130,12 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       setActivityCategories(categories);
       setTasks(dbTasks);
 
-      const dayOfWeekToday = localTodayStart.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+      const dayOfWeekToday = localTodayZero.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
       
       const dateRangeForCandidateBlocks = [
-        formatDateFns(addDays(todayStartUTC, -1), "yyyy-MM-dd"), 
+        formatDateFns(addDays(localTodayZero, -1), "yyyy-MM-dd"), 
         currentFreshTodayDateString, 
-        formatDateFns(addDays(todayStartUTC, 1), "yyyy-MM-dd")  
+        formatDateFns(addDays(localTodayZero, 1), "yyyy-MM-dd")  
       ];
       
       let candidateDbBlocks: DBTimeBlock[] = [];
@@ -161,17 +163,17 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         const alreadyExistsAsTodayBlock = candidateDbBlocks.some(block =>
             block.fixedBreakId === fixedBreakIdStr &&
             block.sourceType === 'fixed_break' &&
-            new Date(block.startTime) >= todayStartUTC && new Date(block.startTime) < addDays(todayStartUTC,1) 
+            new Date(block.startTime) >= displayPeriodStart && new Date(block.startTime) < displayPeriodStartNextDay
         );
 
         if (!alreadyExistsAsTodayBlock) {
           const [startHour, startMinute] = rule.startTime.split(':').map(Number);
           const [endHour, endMinute] = rule.endTime.split(':').map(Number);
 
-          let startTime = new Date(localTodayStart);
+          let startTime = new Date(localTodayZero);
           startTime.setHours(startHour, startMinute, 0, 0);
 
-          let endTime = new Date(localTodayStart);
+          let endTime = new Date(localTodayZero);
           endTime.setHours(endHour, endMinute, 0, 0);
           
           if (endTime.getTime() <= startTime.getTime()) {
@@ -218,23 +220,23 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           const blockStartTime = new Date(block.startTime); 
           const blockEndTime = new Date(block.endTime);  
 
-          if (block.title === "记录" || (block.id === 45 && block.date === "2025-05-19")) { 
+          if (block.title === "记录" || (block.id === 45 && block.date === "2025-05-19") || block.title.startsWith("测试")) { 
             console.log(`TimelineCard Filter Debug for block "${block.title}" (ID: ${block.id}, DBDate: ${block.date}):`);
             console.log(`  block.startTime (raw from DB): ${block.startTime}`);
             console.log(`  block.endTime (raw from DB): ${block.endTime}`);
             console.log(`  blockStartTime (JS Date obj): ${blockStartTime.toISOString()} (Local: ${blockStartTime.toString()})`);
             console.log(`  blockEndTime (JS Date obj): ${blockEndTime.toISOString()} (Local: ${blockEndTime.toString()})`);
             console.log(`  Using currentFreshTodayDateString for filtering: ${currentFreshTodayDateString}`); 
-            console.log(`  todayStartUTC (for filtering): ${todayStartUTC.toISOString()} (Local: ${new Date(todayStartUTC.getFullYear(), todayStartUTC.getUTCMonth(), todayStartUTC.getUTCDate(), 0,0,0).toString()})`);
-            console.log(`  todayEndUTC (for filtering): ${todayEndUTC.toISOString()} (Local: ${new Date(todayEndUTC.getFullYear(), todayEndUTC.getUTCMonth(), todayEndUTC.getUTCDate(), 23,59,59,999).toString()})`);
-            const condition1 = blockStartTime < todayEndUTC;
-            const condition2 = blockEndTime > todayStartUTC;
-            console.log(`  Condition1 (blockStartTime < todayEndUTC): ${condition1}`);
-            console.log(`  Condition2 (blockEndTime > todayStartUTC): ${condition2}`);
+            console.log(`  displayPeriodStart (for filtering): ${displayPeriodStart.toISOString()} (Local: ${displayPeriodStart.toString()})`);
+            console.log(`  displayPeriodEnd (for filtering): ${displayPeriodEnd.toISOString()} (Local: ${displayPeriodEnd.toString()})`);
+            const condition1 = blockStartTime < displayPeriodEnd;
+            const condition2 = blockEndTime > displayPeriodStart;
+            console.log(`  Condition1 (blockStartTime < displayPeriodEnd): ${condition1}`);
+            console.log(`  Condition2 (blockEndTime > displayPeriodStart): ${condition2}`);
             console.log(`  Overall overlapsToday evaluation: ${condition1 && condition2}`);
           }
           
-          const overlapsToday = blockStartTime < todayEndUTC && blockEndTime > todayStartUTC;
+          const overlapsToday = blockStartTime < displayPeriodEnd && blockEndTime > displayPeriodStart;
           
           if (!overlapsToday) {
             if (block.fixedBreakId && block.sourceType === 'fixed_break' && block.date === currentFreshTodayDateString) { 
@@ -330,9 +332,9 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   useEffect(() => {
     if (cardContentRef.current) {
       const now = new Date(currentTime);
-      const startOfDay = new Date(now);
-      startOfDay.setHours(0, 0, 0, 0);
-      const minutesFromStartOfDay = differenceInMinutes(now, startOfDay);
+      const startOfDayForIndicator = new Date(now);
+      startOfDayForIndicator.setHours(0, 0, 0, 0);
+      const minutesFromStartOfDay = differenceInMinutes(now, startOfDayForIndicator);
       const totalMinutesInDay = 24 * 60;
       const clampedMinutes = Math.min(Math.max(minutesFromStartOfDay, 0), totalMinutesInDay);
       const percentageOfDay = clampedMinutes / totalMinutesInDay;
@@ -343,7 +345,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       const effectiveHeight = scrollHeight > clientHeight ? scrollHeight : clientHeight;
       let newPosition = percentageOfDay * effectiveHeight;
       
-      newPosition = Math.max(0, Math.min(newPosition, scrollHeight - 2));
+      newPosition = Math.max(0, Math.min(newPosition, effectiveHeight - 2));
 
       setIndicatorPosition(newPosition);
     }
@@ -388,6 +390,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     if (window.confirm(`确定要从时间轴移除此安排 "${blockTitle}" 吗？`)) {
       try {
         setLoading(true);
+        loadingRef.current = true;
         await removeDB(ObjectStores.TIME_BLOCKS, blockId);
         toast({
           title: "删除成功",
@@ -401,8 +404,6 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           description: "无法删除时间块，请重试。",
           variant: "destructive",
         });
-      } finally {
-        setLoading(false);
       }
     }
   };
@@ -417,7 +418,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
              suggestedStartTime = lastBlockEndTime;
         }
     }
-    if (suggestedStartTime < now) {
+    if (formatDateFns(suggestedStartTime, "yyyy-MM-dd") === currentTodayForModal && suggestedStartTime < now) {
         suggestedStartTime = new Date(now);
         const minutes = suggestedStartTime.getMinutes();
         const roundedMinutes = Math.ceil(minutes / 15) * 15;
@@ -443,7 +444,6 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const handleOpenEditModal = (block: TimelineUITimeBlock) => {
     setExternalModalInitialData({
         ...block,
-        date: block.date,
         startTime: new Date(block.startTime),
         endTime: new Date(block.endTime),
         isLogged: block.isLogged ? 1 : 0,
@@ -477,6 +477,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const handleExternalModalSubmitSuccess = async () => {
     setIsExternalModalOpen(false);
     setLoading(true);
+    loadingRef.current = true;
     await fetchTimeBlocks();
   };
 
@@ -522,7 +523,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         <CardContent className="pb-2 flex-grow flex flex-col justify-center items-center min-h-[200px] text-red-500">
           <AlertCircle className="h-8 w-8 mb-2" />
           <p>{error}</p>
-          <Button variant="outline" size="sm" onClick={() => {setLoading(true); fetchTimeBlocks();}} className="mt-4">
+          <Button variant="outline" size="sm" onClick={() => {setLoading(true); loadingRef.current = true; fetchTimeBlocks();}} className="mt-4">
             重试
           </Button>
         </CardContent>
@@ -545,28 +546,16 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-md font-medium">今日时间轴</CardTitle>
+          <Button variant="outline" size="sm" onClick={handleOpenAddModal} disabled={loading} className="ml-auto">
+            <Plus className="mr-1.5 h-4 w-4" /> 添加
+          </Button>
         </div>
         <CardDescription>您今日的日程安排 {loading && timeBlocks.length > 0 && "(更新中...)"}</CardDescription>
       </CardHeader>
       <CardContent ref={cardContentRef} className="pb-2 flex-grow overflow-y-auto relative">
-        {/* Past Time Mask */}
-        {getTodayDateString() === todayDateStringForUI && !loading && timeBlocks.length > 0 && (
-          <div
-            className="absolute top-0 left-0 right-0 bg-gray-500/15 dark:bg-gray-600/20 z-[5] pointer-events-none"
-            style={{ height: `${indicatorPosition}px` }}
-            aria-hidden="true"
-          />
-        )}
-
-        {/* Current Time Indicator */}
-        {getTodayDateString() === todayDateStringForUI && !loading && (
-          <div
-            className="absolute left-0 right-0 h-0.5 bg-blue-500/75 z-10 transition-all duration-300 ease-linear pointer-events-none"
-            style={{ top: `${indicatorPosition}px` }}
-            title={`当前时间: ${formatTime(currentTime)}`}
-          >
-            <div className="absolute -left-0.5 -top-[2.5px] h-1.5 w-1.5 rounded-full bg-blue-500/75"></div>
-          </div>
+        <div className="relative">
+          {timeBlocks.length > 0 && (
+            <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700 z-0"></div>
         )}
 
         {timeBlocks.length === 0 && !loading ? (
@@ -576,38 +565,16 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
             <p className="text-sm text-muted-foreground">尝试从任务列表添加，或直接在此处创建时间块。</p>
           </div>
         ) : (
-          <div className="space-y-0">
+            <div className="space-y-0 relative z-10 mt-0">
             {timeBlocks.map((block, index) => {
-              const blockStartTime = new Date(block.startTime);
-              const blockEndTime = new Date(block.endTime);
               const isCurrentBlock =
-                new Date(currentTime) >= blockStartTime &&
-                new Date(currentTime) < blockEndTime;
+                  currentTime >= block.startTime &&
+                  currentTime < block.endTime;
 
               let gapSpacer: ReactNode = null;
-              if (index > 0) {
-                const prevBlock = timeBlocks[index - 1];
-                const prevBlockEndTime = new Date(prevBlock.endTime);
-                const currentBlockStartTime = new Date(block.startTime);
-                const diffMinutes = differenceInMinutes(currentBlockStartTime, prevBlockEndTime);
-
-                if (diffMinutes > 1) {
-                  const minSpacerHeight = 8;
-                  const spacerHeight = Math.max(minSpacerHeight, diffMinutes * 0.35);
-                  gapSpacer = (
-                    <div 
-                      style={{ height: `${spacerHeight}px` }}
-                      className="w-full opacity-50"
-                      title={`空闲: ${Math.floor(diffMinutes / 60)}h ${diffMinutes % 60}m`}
-                    >
-                    </div>
-                  );
-                }
-              }
 
               return (
-                <React.Fragment key={block.id}>
-                  {gapSpacer}
+                  <div key={block.id} className="relative pl-8 pb-1.5 group">
                   <TimelineBlockItemContent
                     key={block.id}
                     block={block}
@@ -620,17 +587,13 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
                     activityCategories={activityCategories}
                     tasks={tasks}
                   />
-                </React.Fragment>
+                  </div>
               );
             })}
           </div>
         )}
+        </div>
       </CardContent>
-      <CardFooter className="pt-2 border-t sticky bottom-0 bg-card">
-        <Button variant="outline" size="sm" className="w-full" onClick={handleOpenAddModal} disabled={loading}>
-          <PlusCircle className="mr-2 h-4 w-4" /> 添加时间块
-        </Button>
-      </CardFooter>
 
       {isExternalModalOpen && (
         <TimeBlockEntryModal
@@ -639,7 +602,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           onSubmitSuccess={handleExternalModalSubmitSuccess}
           mode={externalModalMode}
           initialData={externalModalInitialData}
-          selectedDate={new Date(todayDateStringForUI)}
+          selectedDate={dateFnsParseISO(todayDateStringForUI)}
           tasks={tasks}
           activityCategories={activityCategories}
         />

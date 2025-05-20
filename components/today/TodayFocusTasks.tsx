@@ -316,7 +316,7 @@ export function TodayFocusTasks({
     };
 
     return (
-        <Card className="flex flex-col shadow-md">
+        <Card className="flex flex-col shadow-md h-full">
             <CardHeader className="pb-2 pt-4 px-4">
                 <CardTitle className="text-lg font-semibold">今日任务</CardTitle>
             </CardHeader>
@@ -336,7 +336,7 @@ export function TodayFocusTasks({
                     </TabsList>
                     {/* Ensure TabsContent stretches and its inner div scrolls */}
                     {tabConfigs.map(tab => (
-                        <TabsContent key={tab.value} value={tab.value} className="flex-grow mt-2 overflow-hidden flex flex-col">
+                        <TabsContent key={tab.value} value={tab.value} className="flex-grow mt-2 flex flex-col">
                            {activeTab === tab.value && renderTabContent(tab.value)} {/* Render content only for active tab to optimize */}
                         </TabsContent>
                     ))}

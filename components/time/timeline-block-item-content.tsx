@@ -20,6 +20,7 @@ import {
   Pencil,
   ClipboardCheck,
   Clock,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -123,36 +124,23 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
 
   // Card styling based on state (需求 四.1 - 方案A/B) -> Rewritten for 需求 三.1 (美化)
   const cardBaseClasses =
-    "rounded-lg p-3 shadow-sm transition-all hover:shadow-md cursor-pointer ml-3"; // ml-3 to make space for icon on left, rounded-lg for 8px
+    "rounded-lg px-3 py-2.5 transition-all hover:shadow-md cursor-pointer shadow-[0px_1px_3px_rgba(0,0,0,0.04),_0px_1px_2px_rgba(0,0,0,0.02)] dark:shadow-[0px_1px_3px_rgba(0,0,0,0.08),_0px_1px_2px_rgba(0,0,0,0.04)] flex-grow min-w-0";
   
-  let cardDynamicStyles = "";
-  if (isCurrentBlock) {
-    cardDynamicStyles = "border-blue-500 bg-blue-50/80 dark:bg-blue-900/70 dark:border-blue-600 ring-2 ring-blue-400/70 shadow-lg";
-  } else if (block.isLogged) {
-    // 已记录的日志条目: 实线边框，背景可考虑分类颜色极浅色调或默认白/类白
-    const loggedBg = category?.color ? `${category.color}15` : "bg-white dark:bg-slate-800/70"; // Example: category color with low alpha or default
-    cardDynamicStyles = `border border-gray-400 dark:border-gray-500 shadow-sm ${category?.color ? '' : 'bg-white dark:bg-slate-800/70'}`;
-    if (category?.color) {
-        cardDynamicStyles = `border border-gray-400 dark:border-gray-500 shadow-sm`; // base border
-        // cardDynamicStyles += ` bg-[${category.color}1A] dark:bg-[${category.color}2A]`; // Does not work with JIT for arbitrary hex
-    } else {
-        cardDynamicStyles = `border border-gray-400 dark:border-gray-500 bg-white dark:bg-slate-800/70 shadow-sm`;
-    }
-    // A simpler approach for logged, ensuring readability:
-    cardDynamicStyles = "border border-gray-400 dark:border-gray-500 bg-white dark:bg-slate-800/80 shadow-sm";
-    if (category?.color) {
-      // If category color exists, we might want a very subtle background tint
-      // For now, keeping it simpler to ensure high contrast with text & elements
-    }
+  let cardSpecificStyles = "";
+  let titleTextStyles = "text-gray-800 dark:text-gray-100";
 
+  if (isCurrentBlock) {
+    cardSpecificStyles = "border border-blue-300 dark:border-blue-700 ring-1 ring-blue-300 dark:ring-blue-600 bg-blue-50 dark:bg-blue-900/60";
+    titleTextStyles = "text-blue-700 dark:text-blue-300 group-hover:text-blue-600 dark:group-hover:text-blue-200";
+  } else if (block.sourceType === 'fixed_break') {
+    cardSpecificStyles = "border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 hover:bg-green-100/70 dark:hover:bg-green-900/70";
+  } else if (block.isLogged) {
+    cardSpecificStyles = "border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-800"; 
   } else {
-    // 计划时间块: 虚线边框, 非常浅的背景
-    if (block.sourceType === 'fixed_break') {
-        cardDynamicStyles = "border-dashed border-teal-400/70 dark:border-teal-600/70 bg-teal-50/50 dark:bg-teal-900/40 hover:bg-teal-100/60 dark:hover:bg-teal-800/50 shadow-sm";
-    } else {
-        cardDynamicStyles = "border-dashed border-gray-300/80 dark:border-gray-600/70 bg-gray-50/60 dark:bg-slate-800/40 hover:bg-gray-100/70 dark:hover:bg-slate-700/50 shadow-sm";
-    }
+    cardSpecificStyles = "border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-800 hover:bg-gray-50/70 dark:hover:bg-slate-700/60";
   }
+  
+  const finalCardStyles = cn(cardBaseClasses, cardSpecificStyles);
 
   // 时长显示 (需求 二.2 - 方案A)
   let durationText = "";
@@ -167,31 +155,37 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
   }
 
   return (
-    // my-1.5 for a bit more space between items
-    <div className={cn("transition-shadow mb-3 flex items-start group")}>
-      {/* Left-side Source Type Icon (需求 三.1 & 三.2) */}
+    // mb-3 is removed because parent div now has pb-6
+    // flex items-start group is kept
+    <div className={cn("transition-shadow flex items-start group")}>
+      {/* Left-side Source Type Icon (需求 三.1 & 三.2) - Demo style adjustment */}
+      {/* Demo style: absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center */}
       <div
         className={cn(
-            "flex-shrink-0 h-10 w-10 rounded-full flex items-center justify-center mr-0 mt-2 shadow", // slightly less shadow: shadow-sm -> shadow
+            "absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center z-10", // Added z-10 to be above the timeline bar
+            // Unified icon background for non-active states
             isCurrentBlock ? "bg-blue-500 text-white" :
-            block.isLogged ? 
-                (category?.color ? 'text-white' : 'bg-green-600 dark:bg-green-700 text-white') :
-                (category?.color ? undefined : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400')
+            block.isLogged ? "bg-green-100 text-green-600" : // Logged items icon remains green
+            block.sourceType === 'fixed_break' ? "bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300" : // Fixed break icon bg: distinct light gray
+            "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" // Default for other planned items
         )}
-        style={isCurrentBlock ? {} : // Current block style is handled by className
-               block.isLogged ? 
-                 (category?.color ? { backgroundColor: category.color, color: 'white' } : {}) :
-                 (category?.color ? { backgroundColor: `${category.color}25`, color: category.color, borderColor: `${category.color}50`, borderWidth: 1 } : {})
-              }
+        // Removed style prop, relying on classNames for demo consistency
         title={sourceTypeDisplayText}
       >
-        {SourceTypeDisplayIcon}
+        {/* Icon mapping to match demo (simplified) */}
+        {block.isLogged ? <CheckCircle2 className="h-4 w-4" /> :
+         isCurrentBlock ? <Loader2 className="h-4 w-4 animate-spin" /> :
+         block.sourceType === 'fixed_break' ? <Coffee className="h-4 w-4" /> :
+         block.sourceType === 'task_plan' && task ? <ClipboardCheck className="h-4 w-4" /> :
+         block.sourceType === 'manual_entry' ? <Pencil className="h-4 w-4" /> :
+         block.sourceType === 'pomodoro_log' ? <Timer className="h-4 w-4" /> :
+         <Activity className="h-4 w-4" /> // Default icon
+        }
       </div>
 
       <div
-        className={cn(cardBaseClasses, cardDynamicStyles, "flex-grow min-w-0")}
+        className={cn(finalCardStyles)}
         onClick={() => {
-          // 番茄记录不允许直接编辑或转为日志，它们是独立的
           if (block.sourceType !== 'pomodoro_log') { 
             handleOpenEditModal(block);
           }
@@ -199,13 +193,13 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
       >
         <div className="flex flex-col justify-between h-full"> {/* Ensure content uses available height */} 
           {/* First line: Title and Time/Duration */} 
-          <div className="flex items-start justify-between mb-1">
-            <h4 className="font-medium text-sm text-gray-800 dark:text-gray-100 truncate flex-grow mr-2 group-hover:text-primary dark:group-hover:text-blue-400" title={blockTitle}>
+          <div className="flex items-start justify-between mb-1"> {/* Changed mb-1.5 to mb-1 */}
+            <h4 className={cn("font-medium text-sm truncate flex-grow mr-2 group-hover:text-primary dark:group-hover:text-blue-400", titleTextStyles)} title={blockTitle}>
               {isCurrentBlock && <Timer className="h-3.5 w-3.5 mr-1.5 inline-block animate-pulse text-blue-500" />}
               {blockTitle}
             </h4>
             <div className="text-right shrink-0">
-              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300"> {/* Adjusted dark mode time color for clarity */}
+              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                 {durationText && <span className="text-[0.68rem] text-gray-500 dark:text-gray-400 mr-1.5">({durationText})</span>}
                 {formatTime(relevantStartTime)} - {formatTime(relevantEndTime)}
               </div>
@@ -213,15 +207,19 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
           </div>
 
           {/* Second line: Badges (Category, Task) and Menu */} 
-          <div className="flex items-end justify-between text-xs mt-auto min-h-[1.5rem]"> {/* mt-auto pushes to bottom */} 
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
+          <div className="flex items-end justify-between text-xs mt-auto min-h-[1.75rem]"> {/* Adjusted min-h from 2rem to 1.75rem (28px) */}
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 overflow-hidden mr-1"> {/* Adjusted gap-y from 1 to 0.5 (2px) */}
               {/* 视觉区分：计划 vs 已记录 (需求 四.1 - 方案B) */} 
               {block.isLogged ? (
-                <Badge className="bg-green-100 text-green-800 dark:bg-green-600/40 dark:text-green-200 py-0 px-1.5 text-[0.68rem] leading-tight rounded-md border-0 shadow-xs">
+                <Badge className="bg-green-100 text-green-800 dark:bg-green-700/50 dark:text-green-200 py-0.5 px-1.5 text-[0.68rem] leading-tight rounded shadow-xs"> {/* Unified py-0.5 and rounded */}
                     <CheckCircle2 className="h-3 w-3 mr-1" /> 已记录
                 </Badge>
+              ) : block.sourceType === 'fixed_break' ? (
+                <div className="inline-flex items-center rounded border border-green-500 dark:border-green-600 px-2 py-0.5 text-xs font-semibold text-green-600 dark:text-green-400"> {/* Changed rounded-full to rounded */}
+                    <Clock className="h-3 w-3 mr-1" /> 固定休息
+                </div>
               ) : (
-                <Badge className="bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-slate-300 py-0 px-1.5 text-[0.68rem] leading-tight rounded-md border-0 shadow-xs">
+                <Badge className="bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-slate-300 py-0.5 px-1.5 text-[0.68rem] leading-tight rounded shadow-xs"> {/* Unified py-0.5 and rounded */}
                     <Clock className="h-3 w-3 mr-1" /> 计划中
                 </Badge>
               )}
@@ -229,7 +227,7 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
               {category && (
                 <Badge
                   variant="outline"
-                  className="py-0 px-1.5 font-normal text-[0.68rem] leading-tight truncate max-w-[100px] rounded-md shadow-xs"
+                  className="py-0.5 px-1.5 font-normal text-[0.68rem] leading-tight truncate max-w-[100px] rounded shadow-xs" /* Unified py-0.5 and rounded */
                   style={{
                     borderColor: category.color || "#D1D5DB", // gray-300
                     backgroundColor: `${category.color || "#E5E7EB"}2A`, // ~gray-200 with alpha (slightly more opaque)
@@ -243,7 +241,7 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
               {task && (
                 <Badge
                   variant="default"
-                  className="py-0 px-1.5 font-normal bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 text-[0.68rem] leading-tight truncate max-w-[120px] cursor-pointer rounded-md shadow-xs"
+                  className="py-0.5 px-1.5 font-normal bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 text-[0.68rem] leading-tight truncate max-w-[120px] cursor-pointer rounded shadow-xs" /* Unified py-0.5 and rounded */
                   title={task.title}
                   // onClick={(e) => { e.stopPropagation(); alert(`Navigate to task: ${task.title}`); }} // Placeholder for task navigation
                 >
