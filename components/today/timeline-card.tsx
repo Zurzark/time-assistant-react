@@ -20,7 +20,8 @@ import {
   PlusCircle,
   Timer,
   Tag as CategoryIcon,
-  Plus
+  Plus,
+  MoveVertical
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -48,8 +49,9 @@ import { cn } from "@/lib/utils"
 import { type TimeBlock as DBTimeBlock, ObjectStores, getByIndex as getDBByIndex, remove as removeDB, add as addDB, update as updateDB, get as getDBItem, FixedBreakRule, getAll as getAllDB, ActivityCategory, Task } from "@/lib/db"
 import { useToast } from "@/components/ui/use-toast"
 import TimeBlockEntryModal, { TimeBlockModalMode } from "@/components/time/time-block-entry-modal"
-import { differenceInMinutes, format as formatDateFns, addDays, parseISO as dateFnsParseISO } from 'date-fns';
+import { differenceInMinutes, format as formatDateFns, addDays, parseISO as dateFnsParseISO, addMinutes } from 'date-fns';
 import TimelineBlockItemContent, { UITimeBlock as TimelineUITimeBlock } from "@/components/time/timeline-block-item-content";
+import { DndContext, DragStartEvent, DragOverlay, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
 
 const getTodayDateString = () => {
   const today = new Date();
@@ -101,6 +103,19 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
   const todayDateStringForUI = getTodayDateString();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 拖拽状态
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [draggedBlock, setDraggedBlock] = useState<TimelineUITimeBlock | null>(null);
+
+  // 配置拖拽传感器
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 至少移动8px才触发拖拽
+      },
+    })
+  );
 
   const fetchTimeBlocks = useCallback(async () => {
     const currentFreshTodayDateString = getTodayDateString();
@@ -481,17 +496,100 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     await fetchTimeBlocks();
   };
 
-  const handleStartPomodoroForBlock = async (blockTaskId: number | string | undefined, blockTitle: string) => {
+  const handleStartPomodoroForBlock = async (blockTaskId: string | number, blockTitle: string) => {
     if (blockTaskId === undefined) {
       toast({ title: "错误", description: "此时间块没有关联的任务ID，无法启动番茄钟。", variant: "destructive" });
       return;
     }
+    
     const numericTaskId = typeof blockTaskId === 'string' ? parseInt(blockTaskId, 10) : blockTaskId;
     if (isNaN(numericTaskId)) {
         toast({ title: "错误", description: "无效的任务ID格式。", variant: "destructive" });
         return;
     }
     onPomodoroClick(numericTaskId, blockTitle);
+  };
+
+  // 处理拖拽开始事件
+  const handleDragStart = (event: any) => {
+    const { active } = event;
+    const id = active.id as number;
+    const block = timeBlocks.find(b => b.id === id);
+    
+    if (block) {
+      setActiveId(id);
+      setDraggedBlock(block);
+    }
+  };
+  
+  // 处理拖拽结束事件
+  const handleDragEnd = async (event: any) => {
+    const { active } = event;
+    const id = active.id as number;
+    
+    // 计算垂直方向移动距离对应的时间变化（每10px = 15分钟）
+    const pixelsPerTimeUnit = 10; // 每10像素
+    const minutesPerTimeUnit = 15; // 对应15分钟
+    
+    // 从event.delta获取y值
+    const deltaY = event.delta?.y || 0;
+    const deltaYRounded = Math.round(deltaY / pixelsPerTimeUnit) * minutesPerTimeUnit;
+    
+    if (deltaYRounded !== 0 && draggedBlock) {
+      try {
+        setLoading(true);
+        
+        // 创建新的开始和结束时间
+        const newStartTime = addMinutes(new Date(draggedBlock.startTime), deltaYRounded);
+        const newEndTime = addMinutes(new Date(draggedBlock.endTime), deltaYRounded);
+        
+        // 检查是否已经被记录
+        if (draggedBlock.isLogged) {
+          const newActualStartTime = draggedBlock.actualStartTime 
+            ? addMinutes(new Date(draggedBlock.actualStartTime), deltaYRounded) 
+            : undefined;
+          const newActualEndTime = draggedBlock.actualEndTime 
+            ? addMinutes(new Date(draggedBlock.actualEndTime), deltaYRounded) 
+            : undefined;
+            
+          await updateDB(ObjectStores.TIME_BLOCKS, {
+            ...draggedBlock,
+            startTime: newStartTime,
+            endTime: newEndTime,
+            actualStartTime: newActualStartTime,
+            actualEndTime: newActualEndTime,
+            updatedAt: new Date()
+          });
+        } else {
+          await updateDB(ObjectStores.TIME_BLOCKS, {
+            ...draggedBlock,
+            startTime: newStartTime,
+            endTime: newEndTime,
+            updatedAt: new Date()
+          });
+        }
+        
+        toast({
+          title: "时间已调整",
+          description: `${draggedBlock.title || "时间块"}已${deltaYRounded > 0 ? "推迟" : "提前"}${Math.abs(deltaYRounded)}分钟`,
+          duration: 3000,
+        });
+        
+        await fetchTimeBlocks();
+      } catch (err) {
+        console.error("Failed to update time block position:", err);
+        toast({
+          title: "调整失败",
+          description: "无法调整时间块位置，请重试。",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    setActiveId(null);
+    setDraggedBlock(null);
   };
 
   if (loading && timeBlocks.length === 0 && !error) {
@@ -556,42 +654,74 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         <div className="relative">
           {timeBlocks.length > 0 && (
             <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700 z-0"></div>
-        )}
+          )}
 
-        {timeBlocks.length === 0 && !loading ? (
-          <div className="flex flex-col items-center justify-center py-10 text-center min-h-[200px]">
-            <CheckCircle2 className="h-10 w-10 text-green-500 mb-3" />
-            <p className="text-md text-muted-foreground">今日时间轴为空。</p>
-            <p className="text-sm text-muted-foreground">尝试从任务列表添加，或直接在此处创建时间块。</p>
-          </div>
-        ) : (
-            <div className="space-y-0 relative z-10 mt-0">
-            {timeBlocks.map((block, index) => {
-              const isCurrentBlock =
-                  currentTime >= block.startTime &&
-                  currentTime < block.endTime;
+          {timeBlocks.length === 0 && !loading ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center min-h-[200px]">
+              <CheckCircle2 className="h-10 w-10 text-green-500 mb-3" />
+              <p className="text-md text-muted-foreground">今日时间轴为空。</p>
+              <p className="text-sm text-muted-foreground">尝试从任务列表添加，或直接在此处创建时间块。</p>
+            </div>
+          ) : (
+            <DndContext 
+              sensors={sensors}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <div className="space-y-0 relative z-10 mt-0">
+                {timeBlocks.map((block, index) => {
+                  const isCurrentBlock =
+                    currentTime >= block.startTime &&
+                    currentTime < block.endTime;
 
-              let gapSpacer: ReactNode = null;
-
-              return (
-                  <div key={block.id} className="relative pl-8 pb-1.5 group">
-                  <TimelineBlockItemContent
-                    key={block.id}
-                    block={block}
-                    isCurrentBlock={isCurrentBlock}
-                    onPomodoroClick={handleStartPomodoroForBlock}
-                    handleOpenEditModal={handleOpenEditModal}
-                    handleDeleteBlock={handleDeleteBlock}
-                    handleOpenLogModalFromPlan={handleOpenLogModalFromPlan}
-                    currentTime={currentTime}
-                    activityCategories={activityCategories}
-                    tasks={tasks}
-                  />
+                  return (
+                    <div key={block.id} className="relative pl-8 pb-1.5 group">
+                      {block.sourceType !== 'fixed_break' && (
+                        <div className="absolute left-0 -ml-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-move text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                          <MoveVertical className="h-4 w-4" />
+                        </div>
+                      )}
+                      <TimelineBlockItemContent
+                        key={block.id}
+                        block={block}
+                        isCurrentBlock={isCurrentBlock}
+                        onPomodoroClick={handleStartPomodoroForBlock}
+                        handleOpenEditModal={handleOpenEditModal}
+                        handleDeleteBlock={handleDeleteBlock}
+                        handleOpenLogModalFromPlan={handleOpenLogModalFromPlan}
+                        currentTime={currentTime}
+                        activityCategories={activityCategories}
+                        tasks={tasks}
+                        isDraggable={block.sourceType !== 'fixed_break'} // 固定休息不可拖拽
+                        dragId={block.id}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* 拖拽叠加层 */}
+              <DragOverlay>
+                {activeId && draggedBlock && (
+                  <div className="pl-8 opacity-80">
+                    <TimelineBlockItemContent
+                      block={draggedBlock}
+                      isCurrentBlock={false}
+                      onPomodoroClick={handleStartPomodoroForBlock}
+                      handleOpenEditModal={handleOpenEditModal}
+                      handleDeleteBlock={handleDeleteBlock}
+                      handleOpenLogModalFromPlan={handleOpenLogModalFromPlan}
+                      currentTime={currentTime}
+                      activityCategories={activityCategories}
+                      tasks={tasks}
+                      isDraggable={false}
+                      dragId={draggedBlock.id}
+                    />
                   </div>
-              );
-            })}
-          </div>
-        )}
+                )}
+              </DragOverlay>
+            </DndContext>
+          )}
         </div>
       </CardContent>
 

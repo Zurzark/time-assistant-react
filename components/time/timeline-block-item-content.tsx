@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { type TimeBlock as DBTimeBlock, ActivityCategory, Task } from "@/lib/db";
+import { useDraggable } from '@dnd-kit/core';
 
 // UITimeBlock 应该与 timeline-card.tsx 中的定义一致，或者从共享类型文件导入
 // 为简化，暂时在此处复制关键部分。理想情况下应共享。
@@ -66,13 +67,15 @@ const formatDurationFromMinutes = (totalMinutes: number): string => {
 export interface TimelineBlockItemContentProps {
   block: UITimeBlock;
   isCurrentBlock: boolean;
-  onPomodoroClick: (taskId: string, taskTitle: string) => void;
+  onPomodoroClick: (taskId: string | number, taskTitle: string) => void;
   handleOpenEditModal: (block: UITimeBlock) => void;
   handleDeleteBlock: (blockId: number, blockTitle: string) => void;
   handleOpenLogModalFromPlan: (block: UITimeBlock) => void;
   currentTime: Date;
   activityCategories: ActivityCategory[];
   tasks: Task[];
+  isDraggable?: boolean;
+  dragId?: number;
 }
 
 export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
@@ -85,7 +88,14 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
   currentTime,
   activityCategories,
   tasks,
+  isDraggable = false,
+  dragId
 }) => {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: dragId || block.id,
+    disabled: !isDraggable
+  });
+
   const isPast = new Date(currentTime) > new Date(block.endTime);
 
   const category = activityCategories.find(
@@ -140,7 +150,11 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
     cardSpecificStyles = "border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-800 hover:bg-gray-50/70 dark:hover:bg-slate-700/60";
   }
   
-  const finalCardStyles = cn(cardBaseClasses, cardSpecificStyles);
+  const finalCardStyles = cn(
+    cardBaseClasses, 
+    cardSpecificStyles,
+    isDragging && "opacity-50 scale-[1.02] z-50 shadow-lg"
+  );
 
   // 时长显示 (需求 二.2 - 方案A)
   let durationText = "";
@@ -184,6 +198,8 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
       </div>
 
       <div
+        ref={isDraggable ? setNodeRef : undefined}
+        {...(isDraggable ? { ...attributes, ...listeners } : {})}
         className={cn(finalCardStyles)}
         onClick={() => {
           if (block.sourceType !== 'pomodoro_log') { 
@@ -220,7 +236,7 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
                     <Clock className="h-3 w-3 mr-1" /> 固定休息
                 </div>
               ) : (
-                <Badge className="bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-slate-300 py-0.5 px-1.5 text-[0.68rem] leading-tight rounded shadow-xs"> {/* Unified py-0.5 and rounded */}
+                <Badge className="bg-blue-100 text-blue-600 dark:bg-blue-800/60 dark:text-blue-300 py-0.5 px-1.5 text-[0.68rem] leading-tight rounded shadow-xs">
                     <Clock className="h-3 w-3 mr-1" /> 计划中
                 </Badge>
               )}
