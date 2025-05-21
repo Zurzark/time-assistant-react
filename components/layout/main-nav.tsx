@@ -1,5 +1,7 @@
+"use client"
+
 import Link from "next/link"
-import { Bell, Calendar, CheckSquare, Flag, Inbox, Plus, Search, Settings, Target, BarChart2, Clock } from "lucide-react"
+import { Bell, Calendar, CheckSquare, Flag, Inbox, Moon, Search, Settings, Sun, Target, BarChart2, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
@@ -12,12 +14,15 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { useTheme } from "next-themes"
 
 interface MainNavProps {
   currentPath?: string
 }
 
 export function MainNav({ currentPath = "/" }: MainNavProps) {
+  const { setTheme, resolvedTheme } = useTheme()
+  
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background">
       <div className="container flex h-16 items-center px-4 sm:px-6">
@@ -107,13 +112,26 @@ export function MainNav({ currentPath = "/" }: MainNavProps) {
             <Input type="search" placeholder="搜索..." className="w-[200px] pl-8 rounded-full bg-muted" />
           </div>
 
-          <Button variant="ghost" size="icon" className="mr-2">
-            <Bell className="h-5 w-5" />
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="mr-2"
+            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          >
+            <div className="relative w-5 h-5">
+              <div className="absolute inset-0 flex items-center justify-center text-[#38BDF8]" 
+                   style={{ opacity: resolvedTheme === 'dark' ? 0 : 1, transform: resolvedTheme === 'dark' ? 'scale(0)' : 'none' }}>
+                <Sun className="h-5 w-5" />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center text-[#0EA5E9]"
+                   style={{ opacity: resolvedTheme === 'dark' ? 1 : 0, transform: resolvedTheme === 'dark' ? 'none' : 'scale(0)' }}>
+                <Moon className="h-5 w-5" />
+              </div>
+            </div>
           </Button>
 
-          <Button variant="default" size="sm" className="rounded-full mr-4">
-            <Plus className="h-4 w-4 mr-1" />
-            <span>添加</span>
+          <Button variant="ghost" size="icon" className="mr-2">
+            <Bell className="h-5 w-5" />
           </Button>
 
           <DropdownMenu>
@@ -192,11 +210,24 @@ export function MainNav({ currentPath = "/" }: MainNavProps) {
           <Button variant="ghost" size="icon">
             <Search className="h-5 w-5" />
           </Button>
+          <Button 
+            variant="ghost" 
+            size="icon"
+            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          >
+            <div className="relative w-5 h-5">
+              <div className="absolute inset-0 flex items-center justify-center text-[#38BDF8]" 
+                   style={{ opacity: resolvedTheme === 'dark' ? 0 : 1, transform: resolvedTheme === 'dark' ? 'scale(0)' : 'none' }}>
+                <Sun className="h-5 w-5" />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center text-[#0EA5E9]"
+                   style={{ opacity: resolvedTheme === 'dark' ? 1 : 0, transform: resolvedTheme === 'dark' ? 'none' : 'scale(0)' }}>
+                <Moon className="h-5 w-5" />
+              </div>
+            </div>
+          </Button>
           <Button variant="ghost" size="icon">
             <Bell className="h-5 w-5" />
-          </Button>
-          <Button variant="default" size="icon" className="rounded-full">
-            <Plus className="h-5 w-5" />
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
