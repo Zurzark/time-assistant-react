@@ -7,7 +7,7 @@ import { PomodoroModal } from "../pomodoro/pomodoro-modal"
 import { TaskStatsProvider } from "../task/task-stats-updater"
 import DatabaseInitializer from "../common/database-initializer"
 import { TaskStatsCard } from "../today/task-stats-card"
-import { FrogTasksCard } from "../today/frog-tasks-card"
+import { QuickInboxCard } from "../today/quick-inbox-card"
 import { TimelineCard } from "../today/timeline-card"
 import { UnifiedAddModal } from "../common/UnifiedAddModal"
 import { TodayFocusTasks } from "../today/TodayFocusTasks"
@@ -190,12 +190,8 @@ export function TodayDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[calc(100vh-250px)]">
           <div className="lg:col-span-2 flex flex-col gap-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <TaskStatsCard timeRange={timeRange} setTimeRange={setTimeRange} />
-              <FrogTasksCard 
-                onPomodoroClick={handlePomodoroClick} 
-                refreshTrigger={todayFocusRefreshKey} 
-                onOpenTimeSelectModal={handleOpenTimeSelectModalForTask} // Pass the new handler
-              />
+              <TaskStatsCard />
+              <QuickInboxCard />
             </div>
             <div className="flex-grow flex flex-col min-h-0">
               <TodayFocusTasks
@@ -206,7 +202,7 @@ export function TodayDashboard() {
                 onToggleComplete={onToggleComplete}
                 onDeleteTask={onDeleteTask}
                 onToggleFrogStatus={onToggleFrogStatus}
-                onAddTaskToTimeline={handleOpenTimeSelectModalForTask} // Pass the new handler
+                onAddTaskToTimeline={handleOpenTimeSelectModalForTask}
                 onPomodoroClick={handlePomodoroClick}
                 onOpenUnifiedAddModalForNewTask={handleOpenUnifiedAddModalForNewTask}
               />
@@ -232,7 +228,7 @@ export function TodayDashboard() {
       <SelectTimeRangeModal
         isOpen={isSelectTimeModalOpen}
         onOpenChange={setIsSelectTimeModalOpen}
-        task={taskForTimelineModal} // taskForTimelineModal is already of Task type from useTaskData
+        task={taskForTimelineModal}
         onConfirm={handleConfirmTimeRangeAndAddTask}
       />
     </TaskStatsProvider>

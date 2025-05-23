@@ -641,7 +641,7 @@ export function TimeLogView() {
             <DialogTitle>确认删除</DialogTitle>
             <DialogDescription>
               您确定要删除这条时间记录吗？此操作无法撤销。
-              {entryToDelete && <p className="mt-2 font-medium">"{entryToDelete.title}"</p>}
+              {entryToDelete && <span className="mt-2 font-medium block">"{entryToDelete.title}"</span>}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
