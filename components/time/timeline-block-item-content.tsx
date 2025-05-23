@@ -39,7 +39,7 @@ import { useDraggable } from '@dnd-kit/core';
 export interface UITimeBlock extends Omit<DBTimeBlock, 'isLogged' | 'activityCategoryId' | 'startTime' | 'endTime' | 'actualStartTime' | 'actualEndTime'> {
   id: number;
   isCurrent?: boolean;
-  isLogged: boolean;
+  isLogged: 0 | 1;
   activityCategoryId?: number;
   startTime: Date;
   endTime: Date;

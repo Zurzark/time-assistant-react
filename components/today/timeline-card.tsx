@@ -276,7 +276,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         .map(block => ({
           ...block,
           id: block.id!,
-          isLogged: block.isLogged === 1,
+          isLogged: block.isLogged,
           startTime: new Date(block.startTime), 
           endTime: new Date(block.endTime),
           actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
