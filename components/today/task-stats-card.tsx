@@ -43,8 +43,7 @@ export function TaskStatsCard({}: TaskStatsCardProps) {
   }
 
   // StatItem sub-component for displaying each statistic
-  const StatItem = ({ icon: Icon, value, label, colorClassName, isSubStat = false }: { 
-    icon: React.ElementType, 
+  const StatItem = ({ value, label, colorClassName, isSubStat = false }: { 
     value: number, 
     label: string, 
     colorClassName?: string, 
@@ -52,7 +51,6 @@ export function TaskStatsCard({}: TaskStatsCardProps) {
   }) => (
     <div className={`flex flex-col items-center justify-center p-1 sm:p-2 rounded-lg ${isSubStat ? 'bg-muted/30 dark:bg-muted/20' : ''}`}>
       <div className="flex items-center">
-        <Icon className={`mr-1.5 ${isSubStat ? 'h-3.5 w-3.5' : 'h-4 w-4 sm:h-5 sm:w-5'} ${colorClassName || 'text-primary dark:text-gray-300'}`} />
         <span className={`${isSubStat ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'} font-bold ${colorClassName || 'text-primary dark:text-gray-200'}`}>{value}</span>
       </div>
       <span className={`text-xs ${isSubStat ? 'text-muted-foreground/80 dark:text-slate-400' : 'text-muted-foreground dark:text-slate-400'}`}>{label}</span>
@@ -79,19 +77,16 @@ export function TaskStatsCard({}: TaskStatsCardProps) {
         {/* Row 1: Core Stats */}
         <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
           <StatItem 
-            icon={Sigma} 
             value={stats.total} 
             label="总任务" 
             colorClassName="text-slate-700 dark:text-slate-300"
           />
           <StatItem 
-            icon={PlayCircle} 
             value={stats.inProgress} 
             label="进行中" 
             colorClassName="text-blue-600 dark:text-blue-400"
           />
           <StatItem 
-            icon={CheckCircle2} 
             value={stats.completedInRange} 
             label="已完成" 
             colorClassName="text-green-600 dark:text-green-400"
@@ -100,21 +95,18 @@ export function TaskStatsCard({}: TaskStatsCardProps) {
         {/* Row 2: Secondary Stats */}
         <div className="grid grid-cols-3 gap-1.5 sm:gap-2 pt-1 sm:pt-2">
           <StatItem 
-            icon={ArrowRightCircle} 
             value={stats.nextAction} 
             label="下一步" 
             isSubStat 
             colorClassName="text-sky-600 dark:text-sky-400"
           />
           <StatItem 
-            icon={AlertCircle} 
             value={stats.overdue} 
             label="已过期" 
             isSubStat 
             colorClassName="text-red-600 dark:text-red-400"
           />
           <StatItem 
-            icon={Repeat} 
             value={stats.recurring} 
             label="重复" 
             isSubStat 

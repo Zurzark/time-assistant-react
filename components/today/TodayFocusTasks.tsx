@@ -19,10 +19,15 @@ import {
     compareDesc,
     differenceInDays,
     parseISO, // If dates from DB are strings
+    isAfter,
+    isBefore,
+    isEqual,
+    isWithinInterval
 } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Plus, CheckSquare } from 'lucide-react';
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"; // 导入确认对话框组件
+import { RRule, Options as RRuleOptions } from 'rrule';
 
 interface TodayFocusTasksProps {
     getProjectNameById: (projectId: number | string | undefined) => string;
@@ -36,7 +41,7 @@ interface TodayFocusTasksProps {
     onOpenUnifiedAddModalForNewTask: () => void;
 }
 
-export type TabValue = "inProgress" | "due" | "completedToday" | "upcomingPlanned" | "dueSoon";
+export type TabValue = "inProgress" | "due" | "completedToday" | "recurring" | "upcomingPlanned" | "dueSoon";
 
 // Placeholder for TaskPriority type if not correctly imported
 // type TaskPriority = "important-urgent" | "important-not-urgent" | "not-important-urgent" | "not-important-not-urgent";
@@ -52,6 +57,7 @@ const tabConfigs: { value: TabValue; label: string }[] = [
     { value: "inProgress", label: "进行中" },
     { value: "due", label: "到期任务" },
     { value: "completedToday", label: "已完成" },
+    { value: "recurring", label: "重复任务" },
     { value: "upcomingPlanned", label: "即将开始" },
     { value: "dueSoon", label: "即将到期" },
 ];
@@ -108,47 +114,54 @@ export function TodayFocusTasks({
     
     const memoizedFilteredTasks = useMemo(() => {
         if (isLoading) return [];
-        const todayStart = startOfDay(new Date());
-        const todayEnd = endOfDay(new Date());
+        const today = new Date();
+        const todayStart = startOfDay(today);
+        const todayEnd = endOfDay(today);
+        const tomorrowStart = startOfDay(addDays(today, 1));
+        const threeDaysLaterEnd = endOfDay(addDays(today, 3));
 
         let filtered: Task[] = [];
 
         switch (activeTab) {
             case "inProgress":
                 filtered = allUtilTasks.filter(task => {
-                    const plannedDate = getSafeDate(task.plannedDate);
-                    const dueDate = getSafeDate(task.dueDate);
+                    // 完全等同于任务统计中的进行中
                     return (
                         task.category === "next_action" &&
                         !task.completed &&
-                        (plannedDate && compareAsc(plannedDate, todayEnd) <= 0) && // plannedDate <= today
-                        (!dueDate || compareAsc(dueDate, todayEnd) > 0) // dueDate > today OR no due date
+                        (!task.dueDate || isAfter(new Date(task.dueDate), todayStart))
                     );
                 });
                 break;
             case "due":
                 filtered = allUtilTasks.filter(task => {
-                    const dueDate = getSafeDate(task.dueDate);
+                    // 等同于任务统计中的已过期
                     return (
                         task.category === "next_action" &&
                         !task.completed &&
-                        (dueDate && compareAsc(dueDate, todayEnd) <= 0) // dueDate <= today
+                        task.dueDate && 
+                        (isBefore(new Date(task.dueDate), todayStart) || isEqual(new Date(task.dueDate), todayStart))
                     );
                 });
                 break;
             case "completedToday":
                 filtered = allUtilTasks.filter(task => {
+                    // 等同于任务统计中的已完成
                     const completedAt = getSafeDate(task.completedAt);
                     return (
-                        task.category === "next_action" &&
                         task.completed &&
-                        (completedAt && isToday(completedAt))
+                        completedAt && 
+                        isWithinInterval(completedAt, { start: todayStart, end: todayEnd })
                     );
                 });
                 break;
+            case "recurring":
+                filtered = allUtilTasks.filter(task => {
+                    // 等同于任务统计中的重复任务
+                    return task.isRecurring && isRecurringTaskOccurringInRange(task, todayStart, todayEnd);
+                });
+                break;
             case "upcomingPlanned":
-                const tomorrowStart = startOfDay(addDays(new Date(), 1));
-                const threeDaysLaterEnd = endOfDay(addDays(new Date(), 3));
                 filtered = allUtilTasks.filter(task => {
                     const plannedDate = getSafeDate(task.plannedDate);
                     return (
@@ -161,16 +174,16 @@ export function TodayFocusTasks({
                 });
                 break;
             case "dueSoon":
-                const tomorrowStartDue = startOfDay(addDays(new Date(), 1));
-                const threeDaysLaterEndDue = endOfDay(addDays(new Date(), 3));
                 filtered = allUtilTasks.filter(task => {
+                    // 等同于进行中 + 即将到期条件
                     const dueDate = getSafeDate(task.dueDate);
                     return (
                         task.category === "next_action" &&
                         !task.completed &&
+                        (!task.dueDate || isAfter(new Date(task.dueDate), todayStart)) && // 进行中条件
                         dueDate && 
-                        compareAsc(dueDate, tomorrowStartDue) >= 0 && // dueDate >= tomorrow
-                        compareAsc(dueDate, threeDaysLaterEndDue) <= 0 // dueDate <= threeDaysLater
+                        compareAsc(dueDate, tomorrowStart) >= 0 &&    // 截止日期 >= 明天
+                        compareAsc(dueDate, threeDaysLaterEnd) <= 0   // 截止日期 <= 三天后
                     );
                 });
                 break;
@@ -178,6 +191,7 @@ export function TodayFocusTasks({
                 return [];
         }
 
+        // 排序逻辑保持不变
         return filtered.sort((a, b) => {
             if (a.isFrog && !b.isFrog) return -1;
             if (!a.isFrog && b.isFrog) return 1;
@@ -186,14 +200,14 @@ export function TodayFocusTasks({
             const prioB = b.priority ? priorityOrder[b.priority] : 5;
             if (prioA !== prioB) return prioA - prioB;
 
-            const dateA = getSafeDate( activeTab === "completedToday" ? a.completedAt : activeTab === "upcomingPlanned" ? a.plannedDate : a.dueDate );
-            const dateB = getSafeDate( activeTab === "completedToday" ? b.completedAt : activeTab === "upcomingPlanned" ? b.plannedDate : b.dueDate );
+            const dateA = getSafeDate(activeTab === "completedToday" ? a.completedAt : activeTab === "upcomingPlanned" ? a.plannedDate : a.dueDate);
+            const dateB = getSafeDate(activeTab === "completedToday" ? b.completedAt : activeTab === "upcomingPlanned" ? b.plannedDate : b.dueDate);
 
             if (activeTab === "completedToday") {
                 if (dateA && dateB) return compareDesc(dateA, dateB);
             } else {
                 if (dateA && dateB) return compareAsc(dateA, dateB);
-                if (dateA && !dateB) return -1; // Tasks with dates first for ascending sort
+                if (dateA && !dateB) return -1;
                 if (!dateA && dateB) return 1;
             }
             return 0;
@@ -205,6 +219,7 @@ export function TodayFocusTasks({
             inProgress: 0,
             due: 0,
             completedToday: 0,
+            recurring: 0,
             upcomingPlanned: 0,
             dueSoon: 0,
         };
@@ -248,6 +263,11 @@ export function TodayFocusTasks({
                 (completedAt && isToday(completedAt))
             ) {
                 counts.completedToday++;
+            }
+
+            // recurring
+            if (task.isRecurring && isRecurringTaskOccurringInRange(task, todayStart, todayEnd)) {
+                counts.recurring++;
             }
 
             // upcomingPlanned
@@ -341,12 +361,12 @@ export function TodayFocusTasks({
             {/* Ensure CardContent takes up remaining space and allows Tabs to fill it */}
             <CardContent className="flex-grow flex flex-col p-2 sm:p-3 md:p-4 !pt-0">
                 <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className="w-full flex-grow flex flex-col">
-                    <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 gap-1 px-0 h-auto shrink-0">
+                    <TabsList className="grid w-full grid-cols-6 gap-1 px-0 h-auto shrink-0">
                         {tabConfigs.map(tab => (
                             <TabsTrigger 
                                 key={tab.value} 
                                 value={tab.value} 
-                                className="text-xs sm:text-sm px-1 py-1.5 sm:px-2 sm:py-2 h-auto whitespace-normal leading-tight data-[state=active]:bg-primary/10 data-[state=active]:text-primary dark:data-[state=active]:bg-primary/20"
+                                className="text-xs px-0.5 py-1 sm:px-1 sm:py-1.5 h-auto whitespace-normal leading-tight data-[state=active]:bg-primary/10 data-[state=active]:text-primary dark:data-[state=active]:bg-primary/20"
                             >
                                 {tab.label} ({tabCounts[tab.value]}) 
                             </TabsTrigger>
@@ -376,4 +396,50 @@ export function TodayFocusTasks({
             />
         </Card>
     );
-} 
+}
+
+// 判断重复任务是否在范围内有实例
+const isRecurringTaskOccurringInRange = (task: Task, checkRangeStart: Date, checkRangeEnd: Date): boolean => {
+    if (!task.isRecurring || !task.recurrenceRule || !task.plannedDate) return false;
+    
+    const dtstart = new Date(task.plannedDate);
+    let ruleOptions: Partial<RRuleOptions> = { dtstart };
+
+    try {
+        // 检查是否为JSON格式
+        if (typeof task.recurrenceRule === 'string' && task.recurrenceRule.startsWith('{')) {
+            const jsonRule = JSON.parse(task.recurrenceRule);
+            
+            // 从JSON创建RRule选项
+            if (jsonRule.frequency === 'daily') {
+                ruleOptions.freq = RRule.DAILY;
+            } else if (jsonRule.frequency === 'weekly') {
+                ruleOptions.freq = RRule.WEEKLY;
+            } else if (jsonRule.frequency === 'monthly') {
+                ruleOptions.freq = RRule.MONTHLY;
+            } else if (jsonRule.frequency === 'yearly') {
+                ruleOptions.freq = RRule.YEARLY;
+            }
+            
+            // 设置其他选项
+            if (jsonRule.endsType === 'on_date' && jsonRule.endDate) {
+                ruleOptions.until = new Date(jsonRule.endDate);
+            }
+            if (jsonRule.endsType === 'after_occurrences' && jsonRule.occurrences) {
+                ruleOptions.count = jsonRule.occurrences;
+            }
+        } else if (typeof task.recurrenceRule === 'string') {
+            // 尝试作为标准RRULE解析
+            const tempRule = RRule.fromString(task.recurrenceRule.startsWith('RRULE:') ? 
+                task.recurrenceRule : 'RRULE:' + task.recurrenceRule);
+            ruleOptions = {...tempRule.options, dtstart};
+        }
+        
+        const rule = new RRule(ruleOptions);
+        const occurrences = rule.between(startOfDay(checkRangeStart), endOfDay(checkRangeEnd), true);
+        return occurrences.length > 0;
+    } catch (e) {
+        console.error("Error creating RRule or getting occurrences:", e, task.recurrenceRule);
+        return false;
+    }
+}; 

@@ -148,13 +148,33 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
       ): boolean => {
         if (task.isRecurring !== 1 || !task.recurrenceRule || !task.plannedDate) return false;
         
-        const dtstart = task.plannedDate; 
+        const dtstart = task.plannedDate;
         let ruleOptions: Partial<RRuleOptions> = { dtstart };
 
         if (typeof task.recurrenceRule === 'string') {
           try {
-            const tempRule = RRule.fromString(task.recurrenceRule.startsWith('RRULE:') ? task.recurrenceRule : 'RRULE:' + task.recurrenceRule);
-            ruleOptions = {...tempRule.options, dtstart };
+            // 检查是否为JSON格式
+            if (task.recurrenceRule.startsWith('{')) {
+              const jsonRule = JSON.parse(task.recurrenceRule);
+              
+              // 从JSON创建RRule选项
+              if (jsonRule.frequency === 'daily') {
+                ruleOptions.freq = RRule.DAILY;
+              } else if (jsonRule.frequency === 'weekly') {
+                ruleOptions.freq = RRule.WEEKLY;
+              } else if (jsonRule.frequency === 'monthly') {
+                ruleOptions.freq = RRule.MONTHLY;
+              } else if (jsonRule.frequency === 'yearly') {
+                ruleOptions.freq = RRule.YEARLY;
+              }
+              
+              // 设置其他选项...
+            } else {
+              // 尝试作为标准RRULE解析
+              const tempRule = RRule.fromString(task.recurrenceRule.startsWith('RRULE:') ? 
+                task.recurrenceRule : 'RRULE:' + task.recurrenceRule);
+              ruleOptions = {...tempRule.options, dtstart};
+            }
           } catch(e) {
             console.warn("Error parsing rrule string:", task.recurrenceRule, e);
             return false;
