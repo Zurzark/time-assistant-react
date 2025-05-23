@@ -628,7 +628,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_none_">不关联任务</SelectItem>
-                  {tasks.map((task) => (
+                  {tasks.filter(task => !task.isDeleted).map((task) => (
                     <SelectItem key={task.id} value={task.id!.toString()}>
                       {task.title}
                     </SelectItem>
