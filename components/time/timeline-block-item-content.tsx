@@ -158,15 +158,28 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
 
   // 时长显示 (需求 二.2 - 方案A)
   let durationText = "";
-  const relevantStartTime = block.isLogged ? block.actualStartTime : block.startTime;
-  const relevantEndTime = block.isLogged ? block.actualEndTime : block.endTime;
-
-  if (relevantStartTime && relevantEndTime) {
-    const diffMins = Math.round((new Date(relevantEndTime).getTime() - new Date(relevantStartTime).getTime()) / (1000 * 60));
-    durationText = formatDurationFromMinutes(diffMins);
-  } else if (block.durationMinutes) {
+  if (block.isLogged && block.durationMinutes && block.durationMinutes > 0) {
+    // 对于已记录的条目，优先使用 durationMinutes 字段
     durationText = formatDurationFromMinutes(block.durationMinutes);
+  } else {
+    // 对于计划或其他情况，基于开始和结束时间计算
+    const startTimeForCalc = block.isLogged ? block.actualStartTime : block.startTime;
+    const endTimeForCalc = block.isLogged ? block.actualEndTime : block.endTime;
+
+    if (startTimeForCalc && endTimeForCalc) {
+      const diffMins = Math.round((new Date(endTimeForCalc).getTime() - new Date(startTimeForCalc).getTime()) / (1000 * 60));
+      if (diffMins > 0) { // 只有当差值大于0时才显示
+        durationText = formatDurationFromMinutes(diffMins);
+      }
+    } else if (block.durationMinutes && block.durationMinutes > 0) {
+      // Fallback for older data or specific cases where startTime/endTime might be missing but durationMinutes exists (e.g. for non-logged items)
+      durationText = formatDurationFromMinutes(block.durationMinutes);
+    }
   }
+  
+  // 确定用于显示时间范围的起止时间
+  const displayStartTime = block.isLogged && block.actualStartTime ? block.actualStartTime : block.startTime;
+  const displayEndTime = block.isLogged && block.actualEndTime ? block.actualEndTime : block.endTime;
 
   const getStatusCapsule = (block: UITimeBlock) => {
     let text = "";
@@ -258,7 +271,7 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
             <div className="text-right shrink-0">
               <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                 {durationText && <span className="text-[0.68rem] text-gray-500 dark:text-gray-400 mr-1.5">({durationText})</span>}
-                {formatTime(relevantStartTime)} - {formatTime(relevantEndTime)}
+                {formatTime(displayStartTime)} - {formatTime(displayEndTime)}
               </div>
             </div>
           </div>
