@@ -1,0 +1,130 @@
+在 Windows 环境下，若不想修改现有设置，可通过 **PowerShell 脚本**或 **第三方工具** 实现端口占用时自动切换。以下是具体方案：
+
+
+### 方案一：使用 PowerShell 脚本自动检测端口
+创建一个 PowerShell 脚本，在启动应用前先检查端口是否被占用，若占用则尝试下一个端口：
+
+1. **创建脚本文件**（例如 `start-with-port.ps1`）：
+   ```powershell
+   param (
+     [int]$StartPort = 3000,
+     [int]$MaxAttempts = 10
+   )
+
+   function Test-Port {
+     param ([int]$Port)
+     $listener = New-Object System.Net.Sockets.TcpListener([IPAddress]::Any, $Port)
+     try {
+       $listener.Start()
+       $true
+     } catch {
+       $false
+     } finally {
+       $listener.Stop()
+     }
+   }
+
+   $port = $StartPort
+   $attempts = 0
+
+   while ((Test-Port -Port $port) -eq $false -and $attempts -lt $MaxAttempts) {
+     Write-Host "Port $port is in use, trying $($port + 1)..."
+     $port++
+     $attempts++
+   }
+
+   if ($attempts -eq $MaxAttempts) {
+     Write-Error "Failed to find available port after $MaxAttempts attempts."
+     exit 1
+   }
+
+   Write-Host "Starting server on port $port..."
+   $env:PORT = $port
+   pnpm start
+   ```
+
+2. **执行脚本**：
+   ```powershell
+   .\start-with-port.ps1
+   ```
+   - 脚本会从 `3000` 端口开始尝试，最多尝试 10 次。
+   - 找到可用端口后，会设置 `PORT` 环境变量并启动 `pnpm start`。
+
+
+### 方案二：使用 cross-env 和 wait-on（需安装依赖）
+通过 `cross-env` 设置环境变量，结合 `wait-on` 检测端口占用：
+
+1. **安装工具**：
+   ```bash
+   pnpm add cross-env wait-on --save-dev
+   ```
+
+2. **修改 `package.json` 脚本**：
+   ```json
+   {
+     "scripts": {
+       "start-auto": "node scripts/start-auto.js"
+     }
+   }
+   ```
+
+3. **创建脚本文件**（例如 `scripts/start-auto.js`）：
+   ```javascript
+   const { execSync } = require('child_process');
+   const { existsSync } = require('fs');
+   const path = require('path');
+
+   function findAvailablePort(startPort = 3000, maxAttempts = 10) {
+     for (let port = startPort; port < startPort + maxAttempts; port++) {
+       try {
+         execSync(`wait-on tcp:${port} --timeout 1000`, { stdio: 'ignore' });
+         console.log(`Port ${port} is occupied, trying ${port + 1}...`);
+       } catch (error) {
+         return port; // 端口未被占用
+       }
+     }
+     throw new Error('No available port found');
+   }
+
+   const port = findAvailablePort();
+   console.log(`Starting server on port ${port}...`);
+   execSync(`cross-env PORT=${port} pnpm start`, { stdio: 'inherit' });
+   ```
+
+4. **执行命令**：
+   ```bash
+   pnpm run start-auto
+   ```
+
+
+### 方案三：使用第三方工具 `start-server-and-test`
+`start-server-and-test` 可以检测端口占用并自动重启服务：
+
+1. **安装工具**：
+   ```bash
+   pnpm add start-server-and-test --save-dev
+   ```
+
+2. **修改 `package.json` 脚本**：
+   ```json
+   {
+     "scripts": {
+       "start:detect": "start-server-and-test \"pnpm start\" http://localhost:3000 \"echo Server started\""
+     }
+   }
+   ```
+
+3. **执行命令**：
+   ```bash
+   pnpm run start:detect
+   ```
+   - 若端口被占用，工具会报错退出，需结合其他脚本实现自动重试。
+
+
+### 总结
+- **推荐方案一**：无需修改项目代码，通过 PowerShell 脚本自动检测端口，适合 Windows 环境。
+- **方案二**：需要安装额外依赖，但跨平台兼容，适合需要统一开发体验的团队。
+
+根据你的具体环境选择合适的方案，确保生产环境也能正常处理端口冲突。
+
+最终采用了方案二

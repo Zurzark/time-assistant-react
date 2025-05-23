@@ -506,7 +506,7 @@ export function useTaskData() {
                 const newTimeBlock: Omit<DBTimeBlockType, 'id'> = {
                     taskId: taskId,
                     title: taskTitle,
-                    sourceType: 'task_plan_manual', // Indicate manual planning
+                    sourceType: 'task_plan', // 从任务添加到时间轴，sourceType 为 task_plan
                     activityCategoryId: undefined, // Or derive from task if applicable
                     startTime: startDateTime,
                     endTime: endDateTime,

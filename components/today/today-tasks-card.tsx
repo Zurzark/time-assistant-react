@@ -181,7 +181,7 @@ export function TodayTasksCard({ onPomodoroClick, onViewAllClick, onAddTaskClick
       const newTimeBlock: Omit<DBTimeBlock, 'id'> = {
         taskId: taskId,
         title: taskTitle,
-        sourceType: 'task_plan_manual_today_card',
+        sourceType: 'task_plan',
         activityCategoryId: undefined,
         startTime: startDateTime,
         endTime: endDateTime,

@@ -92,28 +92,33 @@ export function TagInput({
 
   // 添加标签（从搜索结果或创建新标签）
   const addTag = async (tagName: string) => {
-    if (!tagName.trim() || selectedTags.includes(tagName)) return;
+    const trimmedTagName = tagName.trim();
+    if (!trimmedTagName || selectedTags.includes(trimmedTagName)) return;
 
-    const tagExists = tags.some(t => t.name === tagName);
-    
-    if (!tagExists) {
-      // 新标签：创建并保存
-      const newTag: TagInfo = {
-        name: tagName,
-        color: "#64748b", // 默认颜色
-        createdAt: new Date(),
-        usageCount: 0  // 初始为0，仅在实际任务保存时增加
-      };
+    // 不需要立即检查 tagExists 或在数据库中创建新标签
+    // 这个逻辑将移至父组件（例如 TaskFormFields）在保存任务时处理
+
+    // const tagExists = tags.some(t => t.name === trimmedTagName);
+    // if (!tagExists) {
+    //   // 新标签：创建并保存
+    //   const newTag: TagInfo = {
+    //     name: trimmedTagName,
+    //     color: "#64748b", // 默认颜色
+    //     createdAt: new Date(),
+    //     usageCount: 0  // 初始为0，仅在实际任务保存时增加
+    //   };
       
-      try {
-        await add(ObjectStores.TAGS, newTag);
-        setTags(prev => [...prev, newTag]);
-      } catch (error) {
-        console.error("创建新标签失败:", error);
-      }
-    }
+    //   try {
+    //     // !! 移除数据库操作 !!
+    //     // await add(ObjectStores.TAGS, newTag); 
+    //     // !! 移除对内部 `tags` 状态的更新，`tags` 只应包含从数据库加载的标签 !!
+    //     // setTags(prev => [...prev, newTag]); 
+    //   } catch (error) {
+    //     console.error("创建新标签失败:", error); // 这个错误现在不应该在这里发生
+    //   }
+    // }
 
-    const newSelectedTags = [...selectedTags, tagName];
+    const newSelectedTags = [...selectedTags, trimmedTagName];
     setSelectedTags(newSelectedTags);
     onChange(newSelectedTags);
     setInputValue("");
@@ -232,45 +237,51 @@ export function TagInput({
                 <div className="flex items-center justify-center py-6">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-              ) : (
-                <>
-                  <CommandEmpty>
+              ) : [
+                  <CommandEmpty key="tag-input-command-empty">
                     <div className="py-3 px-2 text-center text-sm text-muted-foreground">
-                      没有找到匹配的标签
+                      没有找到结果。按 Enter 创建新标签。
                     </div>
-                    {inputValue.trim() && (
-                      <CommandItem 
-                        onSelect={() => {
-                          addTag(inputValue);
-                          setOpen(false);
-                        }}
-                        className="border-t border-border px-2 py-1.5"
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        创建新标签 "{inputValue}"
-                      </CommandItem>
-                    )}
-                  </CommandEmpty>
-                  <CommandGroup>
-                    {searchResults.map(tag => (
-                      <CommandItem
-                        key={tag.name}
-                        onSelect={() => {
-                          addTag(tag.name);
-                          setOpen(false);
-                        }}
-                        className="flex items-center px-2 py-1.5"
-                      >
-                        <div 
-                          className="w-3 h-3 rounded-full mr-2"
-                          style={{ backgroundColor: tag.color }}
-                        />
-                        <span>{tag.name}</span>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </>
-              )}
+                  </CommandEmpty>,
+                  
+                  inputValue.trim() && 
+                   !tags.some(tag => tag.name.toLowerCase() === inputValue.trim().toLowerCase()) && 
+                   !selectedTags.includes(inputValue.trim()) && (
+                    <CommandItem
+                      key="create-new-tag-item"
+                      onSelect={() => {
+                        addTag(inputValue.trim());
+                        setOpen(false);
+                      }}
+                      className="px-2 py-1.5 cursor-pointer"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      创建新标签 "{inputValue.trim()}"
+                    </CommandItem>
+                  ),
+                  
+                  ...searchResults.map(tag => (
+                    <CommandItem
+                      key={tag.name} 
+                      value={tag.name} 
+                      onSelect={() => {
+                        addTag(tag.name);
+                        setOpen(false);
+                      }}
+                      className="px-2 py-1.5 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        {tag.color && (
+                          <span 
+                            className="inline-block w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                          ></span>
+                        )}
+                        {tag.name}
+                      </div>
+                    </CommandItem>
+                  ))
+                ].filter(Boolean)}
             </CommandList>
           </Command>
         </PopoverContent>

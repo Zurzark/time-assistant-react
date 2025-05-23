@@ -175,12 +175,28 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
     if (block.sourceType === 'fixed_break') {
       text = "固定休息";
       className = "bg-gray-100 text-gray-700 dark:bg-gray-700/30 dark:text-gray-300";
-    } else if (block.sourceType === 'task_plan' || block.sourceType === 'task_plan_manual' || !block.isLogged) {
-      text = "计划";
-      className = "bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-300";
-    } else if (block.isLogged) {
-      text = "已记录";
-      className = "bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-300";
+    } else if (block.isLogged) { // isLogged === 1
+      // 对于已记录的，根据 sourceType 进一步区分
+      if (block.sourceType === 'time_log') {
+        text = "已记录";
+        className = "bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-300";
+      } else if (block.sourceType === 'pomodoro_log') {
+        text = "番茄记录"; // 或者也叫 "已完成番茄钟"
+        className = "bg-orange-100 text-orange-700 dark:bg-orange-700/30 dark:text-orange-300"; // 给番茄钟一个不同颜色
+      } else {
+        text = "已记录未知"; // 理论上不应出现
+        className = "bg-red-100 text-red-700"; 
+      }
+    } else { // isLogged === 0 (计划项)
+      if (block.sourceType === 'manual_entry' || block.sourceType === 'task_plan') {
+        text = "计划";
+        className = "bg-blue-100 text-blue-700 dark:bg-blue-700/30 dark:text-blue-300";
+      } else if (block.sourceType !== 'fixed_break'){
+        // 对于其他未记录的非固定休息项 (理论上不应有除了 manual_entry, task_plan, fixed_break 之外的 isLogged=0)
+        text = "计划外"; // 或其他合适的标签
+        className = "bg-purple-100 text-purple-700"; 
+      }
+      // fixed_break 且 isLogged=0 的情况已在最前面处理
     }
 
     if (!text) return null;

@@ -20,9 +20,14 @@ export async function scheduleTaskToTimeline(
 
   // 2. 计算任务时长
   let taskDurationMinutes = DEFAULT_EVENT_DURATION_MINUTES;
-  if (task.estimatedPomodoros && task.estimatedPomodoros > 0) {
-    taskDurationMinutes = task.estimatedPomodoros * POMODORO_DURATION_MINUTES;
+  // 优先使用 estimatedDurationHours (如果存在)
+  if (task.estimatedDurationHours && task.estimatedDurationHours > 0) {
+    taskDurationMinutes = task.estimatedDurationHours * 60;
+  } else if (task.actualPomodoros && task.actualPomodoros > 0) { // 其次使用 actualPomodoros (虽然这更像是实际值，但作为一种备选)
+    taskDurationMinutes = task.actualPomodoros * POMODORO_DURATION_MINUTES;
   }
+  // 如果都没有，则使用默认时长 (DEFAULT_EVENT_DURATION_MINUTES 已经在前面赋过值了)
+
   if (taskDurationMinutes <= 0) {
     taskDurationMinutes = DEFAULT_EVENT_DURATION_MINUTES; // 防止0或负时长
   }
@@ -93,9 +98,10 @@ export async function scheduleTaskToTimeline(
   const newTimeBlockPayload: Omit<TimeBlock, 'id'> = {
     title: task.title,
     taskId: task.id,
-    type: 'task', // 默认类型为 task
+    sourceType: 'task_plan', // 默认类型为 task_plan
     startTime: newEventStartTime,
     endTime: newEventEndTime,
+    isLogged: 0, // 计划任务默认为未记录
     date: `${newEventStartTime.getFullYear()}-${String(newEventStartTime.getMonth() + 1).padStart(2, '0')}-${String(newEventStartTime.getDate()).padStart(2, '0')}`,
     createdAt: new Date(),
     updatedAt: new Date(),

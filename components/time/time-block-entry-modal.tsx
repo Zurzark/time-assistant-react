@@ -280,34 +280,55 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
     let finalDbPayload: Partial<TimeBlock> = {};
 
     if (mode === "plan-create" || mode === "plan-edit") {
+      let determinedSourceType = 'manual_entry'; // 默认为 manual_entry
+      if (mode === 'plan-edit' && initialData?.sourceType === 'task_plan') {
+        determinedSourceType = 'task_plan'; // 如果是编辑已有的 task_plan，则保持
+      }
+      // 如果 mode 是 plan-create，且 initialData 中带有 taskId，这通常意味着从任务列表的"添加到时间轴"入口（但不是时间轴直接创建）
+      // 这种情况下，根据用户规则 "任务 -> 添加到时间轴 sourceType task_plan 0"
+      if (mode === 'plan-create' && initialData?.taskId) {
+         determinedSourceType = 'task_plan';
+      }
+
+
       finalDbPayload = {
         ...commonPayload,
         startTime: startDateTime,
         endTime: endDateTime,
         isLogged: 0,
-        sourceType: formData.taskId ? 'task_plan' : (initialData?.sourceType || 'manual_entry'),
+        sourceType: determinedSourceType,
         actualStartTime: undefined,
         actualEndTime: undefined,
       };
     } else { // log-create, log-edit, plan-to-log
       finalDbPayload = {
         ...commonPayload,
-        actualStartTime: startDateTime,
-        actualEndTime: endDateTime,
+        actualStartTime: startDateTime, // 实际时间来自表单
+        actualEndTime: endDateTime,   // 实际时间来自表单
         isLogged: 1,
+        sourceType: 'time_log', // 所有日志类型都为 time_log
       };
-      if (mode === 'plan-to-log' && initialData) {
-        finalDbPayload.startTime = initialData.startTime ? (typeof initialData.startTime === 'string' ? parseISO(initialData.startTime) : initialData.startTime) : undefined;
-        finalDbPayload.endTime = initialData.endTime ? (typeof initialData.endTime === 'string' ? parseISO(initialData.endTime) : initialData.endTime) : undefined;
-        finalDbPayload.sourceType = initialData.sourceType || 'manual_entry';
-      } else if (initialData?.startTime && initialData?.endTime) { // log-edit with existing plan times
-        finalDbPayload.startTime = typeof initialData.startTime === 'string' ? parseISO(initialData.startTime) : initialData.startTime;
-        finalDbPayload.endTime = typeof initialData.endTime === 'string' ? parseISO(initialData.endTime) : initialData.endTime;
-        finalDbPayload.sourceType = initialData.sourceType || 'manual_entry';
-      } else {
+
+      // 设置计划开始/结束时间 (startTime, endTime)
+      if (mode === 'log-create') {
+        // 对于直接创建日志，计划时间等于实际时间
         finalDbPayload.startTime = startDateTime;
         finalDbPayload.endTime = endDateTime;
-        finalDbPayload.sourceType = initialData?.sourceType || 'manual_entry';
+      } else { // log-edit 或 plan-to-log
+        // 优先使用 initialData 中的原计划时间
+        finalDbPayload.startTime = initialData?.startTime 
+          ? (typeof initialData.startTime === 'string' ? parseISO(initialData.startTime) : initialData.startTime) 
+          : startDateTime; // Fallback to actual times if original plan times are not available
+        finalDbPayload.endTime = initialData?.endTime 
+          ? (typeof initialData.endTime === 'string' ? parseISO(initialData.endTime) : initialData.endTime) 
+          : endDateTime;   // Fallback to actual times
+        
+        // 对于 plan-to-log，确保 sourceType 也被更新 (虽然上面已经设为 time_log，这里再次强调)
+        // 并且，如果 initialData 中有 sourceType，且不是 time_log，也需要确保最终是 time_log
+        if (initialData?.sourceType && initialData.sourceType !== 'time_log') {
+            // This is handled by the blanket sourceType: 'time_log' assignment above.
+            // No specific action needed here for sourceType if it's already set.
+        }
       }
     }
     

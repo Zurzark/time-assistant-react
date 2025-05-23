@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { CalendarIcon, InfoCircledIcon } from "@radix-ui/react-icons";
 import { format, addDays, getDay, formatISO } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Project as DBProject, Task as DBTask, ActivityCategory } from "@/lib/db";
+import { Project as DBProject, Task as DBTask, ActivityCategory, getAll, add, ObjectStores } from "@/lib/db";
 import { NO_PROJECT_VALUE, TaskPriority as UtilTaskPriority } from "@/lib/task-utils";
 import { toast } from "sonner";
 import { 
@@ -21,7 +21,7 @@ import {
   serializeRecurrenceRule, 
   getRecurrenceDescription 
 } from '@/lib/recurrence-utils';
-import { TagInput } from "@/components/ui/tag-input";
+import { TagInput, TagInfo } from "@/components/ui/tag-input";
 
 // Priority type, consistent with UIPriority used elsewhere
 // Export this type so it can be imported by other components like EditTaskDialog
@@ -115,6 +115,7 @@ export function TaskFormFields({
   const [defaultActivityCategoryId, setDefaultActivityCategoryId] = useState<number | undefined>(initialData?.defaultActivityCategoryId);
 
   const [internalProjects, setInternalProjects] = useState<DBProject[]>(availableProjects);
+  const [existingTags, setExistingTags] = useState<TagInfo[]>([]);
 
   const estimatedPomodorosDisplay = useMemo(() => {
     if (estimatedDurationHours > 0 && pomodoroDurationMinutes > 0) {
@@ -162,6 +163,18 @@ export function TaskFormFields({
     setInternalProjects(availableProjects);
   }, [availableProjects]);
 
+  useEffect(() => {
+    const loadExistingTags = async () => {
+      try {
+        const tagsFromDB = await getAll<TagInfo>(ObjectStores.TAGS);
+        setExistingTags(tagsFromDB);
+      } catch (error) {
+        console.error("Failed to load existing tags:", error);
+      }
+    };
+    loadExistingTags();
+  }, []);
+
   const handleSubmit = async () => {
     if (!title.trim()) {
       toast.error("任务标题不能为空");
@@ -171,6 +184,42 @@ export function TaskFormFields({
     let finalDueDate = dueDate;
     if (isRecurring) {
       finalDueDate = undefined;
+    }
+    
+    const newTagsToCreate: TagInfo[] = [];
+    const finalTaskTags: string[] = [];
+
+    for (const tagName of tags) {
+      const trimmedTagName = tagName.trim();
+      if (!trimmedTagName) continue;
+
+      finalTaskTags.push(trimmedTagName);
+
+      const isExisting = existingTags.some(et => et.name.toLowerCase() === trimmedTagName.toLowerCase());
+      if (!isExisting) {
+        if (!newTagsToCreate.some(ntc => ntc.name.toLowerCase() === trimmedTagName.toLowerCase())) {
+          newTagsToCreate.push({
+            name: trimmedTagName,
+            color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`,
+            createdAt: new Date(),
+            usageCount: 1
+          });
+        }
+      }
+    }
+
+    if (newTagsToCreate.length > 0) {
+      try {
+        for (const newTag of newTagsToCreate) {
+          await add(ObjectStores.TAGS, newTag);
+        }
+        setExistingTags(prev => [...prev, ...newTagsToCreate]);
+        toast.success(`${newTagsToCreate.length} 个新标签已创建`);
+      } catch (error) {
+        console.error("Error saving new tags:", error);
+        toast.error("保存新标签时出错，请重试。");
+        return;
+      }
     }
     
     let recurrenceRuleString: string | undefined = undefined;
@@ -207,7 +256,7 @@ export function TaskFormFields({
       dueDate: finalDueDate, 
       estimatedDurationHours: estimatedDurationHours > 0 ? estimatedDurationHours : 0,
       projectId,
-      tags,
+      tags: finalTaskTags,
       isFrog,
       isRecurring,
       recurrenceFrequency: isRecurring ? recurrenceFrequency : undefined,

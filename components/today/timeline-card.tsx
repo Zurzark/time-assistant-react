@@ -451,6 +451,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       startTime: suggestedStartTime,
       endTime: oneHourLater,
       isLogged: 0,
+      sourceType: 'manual_entry',
     });
     setExternalModalMode("plan-create");
     setIsExternalModalOpen(true);
@@ -477,11 +478,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       actualStartTime: new Date(block.startTime),
       actualEndTime: new Date(block.endTime),
       isLogged: 1,
-      sourceType: block.sourceType,
-      originalPlan: { 
-        startTime: new Date(block.startTime),
-        endTime: new Date(block.endTime)
-      },
+      sourceType: 'time_log',
       startTime: new Date(block.startTime),
       endTime: new Date(block.endTime),
     });

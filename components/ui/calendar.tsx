@@ -3,11 +3,17 @@
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { DayPicker, DayPickerProps } from "react-day-picker"
+import { zhCN } from "date-fns/locale";
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>
+
+const formatWeekdayNameCustom = (day: Date) => {
+  const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+  return weekdays[day.getDay()];
+};
 
 function Calendar({
   className,
@@ -19,6 +25,11 @@ function Calendar({
     <DayPicker
       showOutsideDays={showOutsideDays}
       className={cn("p-3", className)}
+      locale={zhCN}
+      weekStartsOn={1}
+      formatters={{
+        formatWeekdayName: formatWeekdayNameCustom,
+      }}
       classNames={{
         months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
         month: "space-y-4",
