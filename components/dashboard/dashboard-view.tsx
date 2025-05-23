@@ -10,10 +10,22 @@ import { Play, Pause, Check, Plus, Clock, CheckCircle2, AlertCircle, Lightbulb, 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useSidebar } from "@/components/ui/sidebar"
-import { TaskFormDialog, type Task } from "../task/task-form-dialog"
 import { toast } from "@/components/ui/use-toast"
 import { SettingsView } from "../views/settings-view"
 import { TodayDashboard } from "./today-dashboard"
+
+// Locally defined Task type based on usage in this file
+interface Task {
+  id: number;
+  title: string;
+  description: string;
+  priority: "high" | "medium" | "low" | string; // Adjusted to allow existing "high" and general string
+  dueDate: string; // Format: "YYYY-MM-DD"
+  estimatedTime: number; // in minutes
+  project: string;
+  status: "in-progress" | "todo" | "completed" | string; // Adjusted for flexibility
+  tags: string[];
+}
 
 export function DashboardView() {
   const [timerActive, setTimerActive] = useState(false)
@@ -368,7 +380,7 @@ export function DashboardView() {
       </div>
 
       {/* 任务表单弹窗 */}
-      <TaskFormDialog open={taskDialogOpen} onOpenChange={setTaskDialogOpen} onSave={handleSaveTask} />
+      {/* <TaskFormDialog open={taskDialogOpen} onOpenChange={setTaskDialogOpen} onSave={handleSaveTask} /> */}
     </div>
   )
 }

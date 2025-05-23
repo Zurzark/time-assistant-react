@@ -642,7 +642,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         <div className="flex items-center justify-between">
           <CardTitle className="text-md font-medium">今日时间轴</CardTitle>
           <Button variant="outline" size="sm" onClick={handleOpenAddModal} disabled={loading} className="ml-auto">
-            <Plus className="mr-1.5 h-4 w-4" /> 添加
+            <Plus className="mr-1.5 h-4 w-4" /> 添加时间块
           </Button>
         </div>
         <CardDescription>您今日的日程安排 {loading && timeBlocks.length > 0 && "(更新中...)"}</CardDescription>
@@ -732,6 +732,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           selectedDate={dateFnsParseISO(todayDateStringForUI)}
           tasks={tasks}
           activityCategories={activityCategories}
+          allowCreationModeSwitch={externalModalMode === "plan-create"}
         />
       )}
     </Card>

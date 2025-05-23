@@ -40,6 +40,7 @@ import {
 import { format, parse, differenceInMinutes, addHours, setHours, setMinutes, parseISO } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import { CalendarIcon, Loader2, Tag } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export type TimeBlockModalMode =
   | "plan-create"   // 创建新的计划时间块
@@ -57,6 +58,7 @@ interface TimeBlockEntryModalProps {
   selectedDate?: Date; // 用于创建时默认填充日期
   tasks?: Task[];
   activityCategories?: ActivityCategory[];
+  allowCreationModeSwitch?: boolean;
 }
 
 interface FormData {
@@ -80,6 +82,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
   selectedDate,
   tasks = [],
   activityCategories = [],
+  allowCreationModeSwitch = false,
 }) => {
   const { toast } = useToast();
   const [formData, setFormData] = useState<FormData>({
@@ -94,7 +97,8 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof FormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-
+  // Internal mode to handle switching between plan-create and log-create when allowCreationModeSwitch is true
+  const [currentInternalMode, setCurrentInternalMode] = useState<TimeBlockModalMode>(mode);
 
   // 使用useRef跟踪模态框是否已初始化，防止重复初始化
   const hasInitializedRef = useRef(false);
@@ -116,7 +120,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
         // 初始化时设置默认时间
         if (initialData) {
           // 处理开始时间
-          const timeSource = (mode === 'log-edit' || mode === 'plan-to-log') && initialData.actualStartTime 
+          const timeSource = (currentInternalMode === 'log-edit' || currentInternalMode === 'plan-to-log' || currentInternalMode === 'log-create') && initialData.actualStartTime 
               ? initialData.actualStartTime 
               : initialData.startTime;
               
@@ -125,7 +129,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
           }
           
           // 处理结束时间
-          const endTimeSource = (mode === 'log-edit' || mode === 'plan-to-log') && initialData.actualEndTime 
+          const endTimeSource = (currentInternalMode === 'log-edit' || currentInternalMode === 'plan-to-log' || currentInternalMode === 'log-create') && initialData.actualEndTime 
               ? initialData.actualEndTime 
               : initialData.endTime;
               
@@ -153,11 +157,14 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
       const newFormData = getInitialValues();
       setFormData(newFormData);
       hasInitializedRef.current = true;
+      // Reset internal mode to the passed mode prop when modal opens
+      setCurrentInternalMode(mode);
       
       console.log("Modal initialized with:", 
         newFormData.startTime, 
         newFormData.endTime, 
-        "Mode:", mode
+        "Mode:", mode,
+        "Internal Mode:", currentInternalMode
       );
     } else if (!isOpen) {
       // 当模态框关闭时，重置初始化标志
@@ -166,9 +173,9 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
   }, [isOpen]); // 只在isOpen变化时触发，其他依赖项通过函数闭包访问最新值
 
   const modalConfig = useMemo(() => {
-    switch (mode) {
+    switch (currentInternalMode) {
       case "plan-create":
-        return { title: "添加新时间块", submitText: "创建时间块", timeLabelPrefix: "计划" };
+        return { title: "创建计划", submitText: "创建时间块", timeLabelPrefix: "计划" };
       case "plan-edit":
         return { title: "编辑时间块", submitText: "保存更改", timeLabelPrefix: "计划" };
       case "log-create":
@@ -180,7 +187,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
       default: // Should not happen
         return { title: "时间条目", submitText: "保存", timeLabelPrefix: "" };
     }
-  }, [mode]);
+  }, [currentInternalMode]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -279,14 +286,14 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
 
     let finalDbPayload: Partial<TimeBlock> = {};
 
-    if (mode === "plan-create" || mode === "plan-edit") {
+    if (currentInternalMode === "plan-create" || currentInternalMode === "plan-edit") {
       let determinedSourceType = 'manual_entry'; // 默认为 manual_entry
-      if (mode === 'plan-edit' && initialData?.sourceType === 'task_plan') {
+      if (currentInternalMode === 'plan-edit' && initialData?.sourceType === 'task_plan') {
         determinedSourceType = 'task_plan'; // 如果是编辑已有的 task_plan，则保持
       }
       // 如果 mode 是 plan-create，且 initialData 中带有 taskId，这通常意味着从任务列表的"添加到时间轴"入口（但不是时间轴直接创建）
       // 这种情况下，根据用户规则 "任务 -> 添加到时间轴 sourceType task_plan 0"
-      if (mode === 'plan-create' && initialData?.taskId) {
+      if (currentInternalMode === 'plan-create' && initialData?.taskId) {
          determinedSourceType = 'task_plan';
       }
 
@@ -310,7 +317,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
       };
 
       // 设置计划开始/结束时间 (startTime, endTime)
-      if (mode === 'log-create') {
+      if (currentInternalMode === 'log-create') {
         // 对于直接创建日志，计划时间等于实际时间
         finalDbPayload.startTime = startDateTime;
         finalDbPayload.endTime = endDateTime;
@@ -338,8 +345,12 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
     let durationMins: number | undefined = undefined;
     if (relevantStartTime && relevantEndTime) {
         const diff = differenceInMinutes(relevantEndTime, relevantStartTime);
-        if (diff > 0) {
+        // 允许创建0分钟的条目，但不允许负数时长
+        if (diff >= 0) {
             durationMins = diff;
+        } else {
+          // 如果结束时间早于开始时间，则可以在 validateForm 中捕获，或者这里先不设 durationMinutes
+          // 根据产品需求，这里暂不处理负数情况，认为 validateForm 会处理
         }
     }
     finalDbPayload.durationMinutes = durationMins;
@@ -348,7 +359,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
     try {
       let savedTimeBlock: TimeBlock;
 
-      const isUpdateOperation = (mode === "plan-edit" || mode === "log-edit" || (mode === "plan-to-log" && initialData?.id !== undefined));
+      const isUpdateOperation = (currentInternalMode === "plan-edit" || currentInternalMode === "log-edit" || (currentInternalMode === "plan-to-log" && initialData?.id !== undefined));
 
       if (isUpdateOperation) {
         if (initialData?.id === undefined) {
@@ -399,7 +410,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{modalConfig.title}</DialogTitle>
-          {mode === 'plan-to-log' && initialData?.originalPlan && (
+          {currentInternalMode === 'plan-to-log' && initialData?.originalPlan && (
             <DialogDescription className="text-sm text-muted-foreground pt-1">
               原计划：
               {format(typeof initialData.originalPlan.startTime === 'string' ? parseISO(initialData.originalPlan.startTime) : initialData.originalPlan.startTime, "HH:mm", { locale: zhCN })} - 
@@ -411,6 +422,20 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
             </DialogDescription>
           )}
         </DialogHeader>
+
+        {allowCreationModeSwitch && (currentInternalMode === "plan-create" || currentInternalMode === "log-create") && (
+          <Tabs
+            value={currentInternalMode}
+            onValueChange={(value) => setCurrentInternalMode(value as TimeBlockModalMode)}
+            className="w-full pt-2 pb-0"
+          >
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="plan-create">创建计划</TabsTrigger>
+              <TabsTrigger value="log-create">直接记录</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
+
         <div className="grid gap-4 py-4">
           {/* Title Field Group */}
           <div>
@@ -470,7 +495,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
                 name="taskId"
                 value={formData.taskId}
                 onValueChange={handleSelectChange("taskId")}
-                disabled={mode === 'plan-to-log' && !!initialData?.taskId} 
+                disabled={currentInternalMode === 'plan-to-log' && !!initialData?.taskId} 
               >
                 <SelectTrigger className="col-span-3">
                   <SelectValue placeholder="选择关联任务 (可选)" />
