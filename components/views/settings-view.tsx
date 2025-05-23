@@ -59,6 +59,7 @@ import {
   // DialogClose, // DialogClose might not be needed globally
 } from "@/components/ui/dialog"
 // import { IconPicker, PickableIconName } from '@/components/ui/icon-picker'; // Moved to ActivityCategorySettings
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 // ActivityCategorySettings component will be imported below
 import { ActivityCategorySettings } from "./settings/activity-category-settings";
@@ -178,6 +179,10 @@ export function SettingsView() {
   const [isFixedBreakRuleModalOpen, setIsFixedBreakRuleModalOpen] = useState(false);
   const [currentEditingFixedBreakRule, setCurrentEditingFixedBreakRule] = useState<FixedBreakRule | null>(null);
   const [fixedBreakRuleSaving, setFixedBreakRuleSaving] = useState(false);
+
+  // 添加删除确认对话框状态
+  const [deleteFixedBreakRuleConfirmOpen, setDeleteFixedBreakRuleConfirmOpen] = useState(false);
+  const [fixedBreakRuleToDelete, setFixedBreakRuleToDelete] = useState<{id: number, label?: string} | null>(null);
 
   // Activity Category states moved to ActivityCategorySettings.tsx
 
@@ -305,20 +310,29 @@ export function SettingsView() {
     }
   };
 
-  const handleDeleteFixedBreakRule = async (ruleId: number, ruleLabel?: string) => {
+  const handleDeleteFixedBreakRule = async (ruleId: number | undefined, ruleLabel?: string) => {
+    if (ruleId === undefined) return;
+    
     const ruleIdentifier = ruleLabel || fixedBreakRules.find(r => r.id === ruleId)?.startTime + ' - ' + fixedBreakRules.find(r => r.id === ruleId)?.endTime;
-    if (window.confirm(`确定要删除此固定休息时段 "${ruleIdentifier}" 吗？此操作无法撤销。`)) {
-      try {
-        setFixedBreakRuleSaving(true);
-        await removeDB(ObjectStores.FIXED_BREAK_RULES, ruleId);
-        toast({ title: "删除成功", description: `固定休息时段 "${ruleIdentifier}" 已被删除。` });
-        loadFixedBreakRules(); // Refresh list
-      } catch (error) {
-        console.error("Failed to delete rule:", error);
-        toast({ title: "删除失败", description: "无法删除该规则。", variant: "destructive" });
-      } finally {
-        setFixedBreakRuleSaving(false);
-      }
+    setFixedBreakRuleToDelete({ id: ruleId, label: ruleIdentifier });
+    setDeleteFixedBreakRuleConfirmOpen(true);
+  };
+  
+  // 确认删除固定休息规则的处理函数
+  const confirmDeleteFixedBreakRule = async () => {
+    if (!fixedBreakRuleToDelete) return;
+    
+    try {
+      setFixedBreakRuleSaving(true);
+      await removeDB(ObjectStores.FIXED_BREAK_RULES, fixedBreakRuleToDelete.id);
+      toast({ title: "删除成功", description: `固定休息时段 "${fixedBreakRuleToDelete.label}" 已被删除。` });
+      loadFixedBreakRules(); // Refresh list
+      setFixedBreakRuleToDelete(null);
+    } catch (error) {
+      console.error("Failed to delete rule:", error);
+      toast({ title: "删除失败", description: "无法删除该规则。", variant: "destructive" });
+    } finally {
+      setFixedBreakRuleSaving(false);
     }
   };
 
@@ -1063,7 +1077,7 @@ export function SettingsView() {
                                   variant="ghost" 
                                   size="icon" 
                                   className="text-destructive hover:text-destructive hover:bg-destructive/10" 
-                                  onClick={() => rule.id !== undefined && handleDeleteFixedBreakRule(rule.id, rule.label)}
+                                  onClick={() => handleDeleteFixedBreakRule(rule.id, rule.label)}
                                   title="删除规则"
                                   disabled={fixedBreakRuleSaving}
                                 >
@@ -1252,6 +1266,18 @@ export function SettingsView() {
           </Card>
         </div>
       </div>
+
+      {/* 固定休息时段删除确认对话框 */}
+      <ConfirmDialog
+        open={deleteFixedBreakRuleConfirmOpen}
+        onOpenChange={setDeleteFixedBreakRuleConfirmOpen}
+        title="确认删除固定休息时段"
+        description={fixedBreakRuleToDelete ? `确定要删除固定休息时段"${fixedBreakRuleToDelete.label}"吗？此操作无法撤销。` : "确定要删除此固定休息时段吗？"}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={confirmDeleteFixedBreakRule}
+        variant="destructive"
+      />
     </div>
   )
 }

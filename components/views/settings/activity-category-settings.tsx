@@ -53,6 +53,7 @@ import {
   DialogClose, // Keep if any dialog uses it explicitly
 } from "@/components/ui/dialog";
 import { IconPicker, PickableIconName } from '@/components/ui/icon-picker';
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface ActivityCategorySettingsProps {
   toast: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void;
@@ -130,6 +131,10 @@ export function ActivityCategorySettings({ toast }: ActivityCategorySettingsProp
   const [relatedItemsCount, setRelatedItemsCount] = useState(0);
   const [activityCategoryFormData, setActivityCategoryFormData] = useState<ActivityCategoryFormData>(initialActivityCategoryFormData);
   const [isIconPickerModalOpen, setIsIconPickerModalOpen] = useState(false);
+  
+  // 添加普通删除确认对话框状态
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [simpleDeleteCategory, setSimpleDeleteCategory] = useState<ActivityCategory | null>(null);
 
   const loadActivityCategories = useCallback(async () => {
     setLoadingActivityCategories(true);
@@ -266,13 +271,11 @@ export function ActivityCategorySettings({ toast }: ActivityCategorySettingsProp
         setActivityCategorySaving(false);
         return;
       }
-      if (window.confirm(`确定要删除分类 "${category.name}" 吗？此分类未被任何时间块使用。`)) {
-        await removeDB(ObjectStores.ACTIVITY_CATEGORIES, category.id);
-        toast({ title: "删除成功", description: `活动分类 "${category.name}" 已被删除。` });
-        loadActivityCategories(); 
-      } else {
-        setActivityCategorySaving(false);
-      }
+      
+      // 显示确认对话框，而不是使用window.confirm
+      setSimpleDeleteCategory(category);
+      setDeleteConfirmOpen(true);
+      setActivityCategorySaving(false);
     } catch (error) {
       console.error("Failed to check/delete activity category:", error);
       toast({ title: "删除失败", description: "检查或删除分类时发生错误。", variant: "destructive" });
@@ -283,6 +286,27 @@ export function ActivityCategorySettings({ toast }: ActivityCategorySettingsProp
        if (!isRecategorizeModalOpen) { 
          setActivityCategorySaving(false);
       }
+    }
+  };
+
+  // 确认删除分类的处理函数（无关联记录的情况）
+  const confirmDeleteCategory = async () => {
+    if (!simpleDeleteCategory || simpleDeleteCategory.id === undefined) {
+      toast({ title: "错误", description: "要删除的分类信息丢失。", variant: "destructive" });
+      return;
+    }
+    
+    setActivityCategorySaving(true);
+    try {
+      await removeDB(ObjectStores.ACTIVITY_CATEGORIES, simpleDeleteCategory.id);
+      toast({ title: "删除成功", description: `活动分类 "${simpleDeleteCategory.name}" 已被删除。` });
+      loadActivityCategories();
+      setSimpleDeleteCategory(null);
+    } catch (error) {
+      console.error("Failed to delete activity category:", error);
+      toast({ title: "删除失败", description: "删除分类时发生错误。", variant: "destructive" });
+    } finally {
+      setActivityCategorySaving(false);
     }
   };
 
@@ -583,6 +607,18 @@ export function ActivityCategorySettings({ toast }: ActivityCategorySettingsProp
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* 无关联记录的删除确认对话框 */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="确认删除活动分类"
+        description={simpleDeleteCategory ? `确定要删除活动分类"${simpleDeleteCategory.name}"吗？此分类未被任何时间块使用。` : "确定要删除此活动分类吗？"}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={confirmDeleteCategory}
+        variant="destructive"
+      />
     </div>
   );
 } 

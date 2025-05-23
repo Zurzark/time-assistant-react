@@ -113,8 +113,6 @@ export function TodayDashboard() {
 
   const onDeleteTask = async (taskId: number) => {
     console.log("Delete task in dashboard for ID:", taskId);
-    // It's good practice to add a confirmation dialog before actual deletion.
-    // For now, proceeding with logical deletion.
     try {
       const taskToDelete = await db.get<db.Task>(db.ObjectStores.TASKS, taskId);
       if (taskToDelete) {
@@ -128,7 +126,7 @@ export function TodayDashboard() {
       }
     } catch (error) {
       console.error("Error deleting task:", error);
-      // Consider adding a user-facing error notification
+      toast.error("删除任务失败，请稍后重试。");
     }
   }
 

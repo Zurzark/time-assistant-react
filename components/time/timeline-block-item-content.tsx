@@ -2,7 +2,7 @@
 // 该组件负责渲染时间轴上的单个时间块卡片，展示其详细信息、状态和操作选项。
 // 它接收一个时间块对象及相关上下文数据（如活动分类、任务列表、当前时间）和回调函数。
 
-import React, { FC, ReactNode } from "react";
+import React, { FC, ReactNode, useState } from "react";
 import {
   Activity,
   CheckCircle2,
@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { type TimeBlock as DBTimeBlock, ActivityCategory, Task } from "@/lib/db";
 import { useDraggable } from '@dnd-kit/core';
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 // UITimeBlock 应该与 timeline-card.tsx 中的定义一致，或者从共享类型文件导入
 // 为简化，暂时在此处复制关键部分。理想情况下应共享。
@@ -95,6 +96,8 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
     id: dragId || block.id,
     disabled: !isDraggable
   });
+
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const isPast = new Date(currentTime) > new Date(block.endTime);
 
@@ -361,7 +364,7 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
                     {(!block.isLogged || (block.isLogged && block.sourceType !== 'fixed_break')) && (
                         <DropdownMenuItem
                             className="text-sm text-red-600 hover:!text-red-600 focus:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/50 focus:!bg-red-50 dark:focus:!bg-red-900/50 dark:text-red-400 dark:focus:text-red-300"
-                            onClick={() => handleDeleteBlock(block.id, blockTitle)}
+                            onClick={() => setDeleteConfirmOpen(true)}
                         >
                             <Trash2 className="mr-2 h-3.5 w-3.5" />
                             {block.isLogged ? "删除日志" : "删除计划"}
@@ -374,6 +377,20 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="确认删除"
+        description={`确定要从时间轴移除 "${blockTitle}" 吗？`}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={() => {
+          setDeleteConfirmOpen(false);
+          handleDeleteBlock(block.id, blockTitle);
+        }}
+        variant="destructive"
+      />
     </div>
   );
 };

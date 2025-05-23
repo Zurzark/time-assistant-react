@@ -402,24 +402,22 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   };
 
   const handleDeleteBlock = async (blockId: number, blockTitle: string) => {
-    if (window.confirm(`确定要从时间轴移除此安排 "${blockTitle}" 吗？`)) {
-      try {
-        setLoading(true);
-        loadingRef.current = true;
-        await removeDB(ObjectStores.TIME_BLOCKS, blockId);
-        toast({
-          title: "删除成功",
-          description: `时间块 "${blockTitle}" 已被移除。它可能会在明日根据固定规则重新生成（如果适用）。`,
-        });
-        await fetchTimeBlocks(); 
-      } catch (err) {
-        console.error("Failed to delete time block:", err);
-        toast({
-          title: "删除失败",
-          description: "无法删除时间块，请重试。",
-          variant: "destructive",
-        });
-      }
+    try {
+      setLoading(true);
+      loadingRef.current = true;
+      await removeDB(ObjectStores.TIME_BLOCKS, blockId);
+      toast({
+        title: "删除成功",
+        description: `时间块 "${blockTitle}" 已被移除。它可能会在明日根据固定规则重新生成（如果适用）。`,
+      });
+      await fetchTimeBlocks(); 
+    } catch (err) {
+      console.error("Failed to delete time block:", err);
+      toast({
+        title: "删除失败",
+        description: "无法删除时间块，请重试。",
+        variant: "destructive",
+      });
     }
   };
 

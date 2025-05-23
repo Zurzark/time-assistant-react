@@ -37,6 +37,7 @@ import {
 } from '@dnd-kit/core';
 import { SelectedDateEvents } from "@/components/calendars/selected-date-events";
 import { UpcomingEvents } from "@/components/calendars/upcoming-events";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 // 辅助函数：将日期对象转换为 YYYY-MM-DD 字符串
 const formatDateToYYYYMMDD = (date: Date): string => {
@@ -212,6 +213,9 @@ export function CalendarView() {
     })
   );
 
+  // 添加删除确认对话框状态
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [blockToDelete, setBlockToDelete] = useState<{id: number, title: string} | null>(null)
 
   // 数据获取函数
   const fetchData = useCallback(async () => {
@@ -377,15 +381,8 @@ export function CalendarView() {
   };
 
   const handleDeleteBlockInSidebar = async (blockId: number, blockTitle: string) => {
-    if (window.confirm(`确定要删除 "${blockTitle}" 吗?`)) {
-      try {
-        await removeDB(ObjectStores.TIME_BLOCKS, blockId);
-        fetchData();
-        toast({ title: "已删除", description: `"${blockTitle}" 已被删除。`});
-      } catch (e) {
-        toast({ title: "删除失败", description: `无法删除: ${e}`, variant: "destructive"});
-      }
-    }
+    setBlockToDelete({ id: blockId, title: blockTitle });
+    setDeleteConfirmOpen(true);
   };
   
   const handleAddEventToSelectedDateFromSidebar = () => {
@@ -401,6 +398,19 @@ export function CalendarView() {
     setIsModalOpen(true);
   };
 
+  // 确认删除时间块的处理函数
+  const confirmDeleteBlock = async () => {
+    if (!blockToDelete) return;
+    
+    try {
+      await removeDB(ObjectStores.TIME_BLOCKS, blockToDelete.id);
+      fetchData();
+      toast({ title: "已删除", description: `"${blockToDelete.title}" 已被删除。`});
+      setBlockToDelete(null);
+    } catch (e) {
+      toast({ title: "删除失败", description: `无法删除: ${e}`, variant: "destructive"});
+    }
+  };
 
   // --- 月视图相关计算 ---
   const daysInMonth = useMemo(() => {
@@ -891,6 +901,18 @@ export function CalendarView() {
           activityCategories={activityCategories}
         />
       )}
+      
+      {/* 添加确认删除时间块对话框 */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="确认删除时间块"
+        description={blockToDelete ? `确定要删除时间块"${blockToDelete.title}"吗？` : "确定要删除此时间块吗？"}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={confirmDeleteBlock}
+        variant="destructive"
+      />
     </div>
   )
 }

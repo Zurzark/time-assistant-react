@@ -22,6 +22,7 @@ import {
 } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Plus, CheckSquare } from 'lucide-react';
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"; // 导入确认对话框组件
 
 interface TodayFocusTasksProps {
     getProjectNameById: (projectId: number | string | undefined) => string;
@@ -69,6 +70,10 @@ export function TodayFocusTasks({
     const [activeTab, setActiveTab] = useState<TabValue>("inProgress");
     const [allUtilTasks, setAllUtilTasks] = useState<Task[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    
+    // 添加删除确认对话框状态
+    const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+    const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
 
     useEffect(() => {
         async function fetchTasks() {
@@ -270,6 +275,19 @@ export function TodayFocusTasks({
         return counts;
     }, [allUtilTasks, isLoading]);
 
+    // 添加处理删除确认的函数
+    const handleDeleteConfirm = () => {
+        if (taskToDelete) {
+            onDeleteTask(taskToDelete.id);
+            setTaskToDelete(null);
+        }
+    };
+
+    const handleTaskDeleteClick = (task: Task) => {
+        setTaskToDelete(task);
+        setIsDeleteConfirmOpen(true);
+    };
+
     const renderTabContent = (tabValue: TabValue) => {
         const tasksForTab = memoizedFilteredTasks; // Use the memoized tasks for the current activeTab
         
@@ -304,7 +322,7 @@ export function TodayFocusTasks({
                             onSelectTask={() => {}} 
                             onToggleComplete={() => { onToggleComplete(task.id); }}
                             onEditTask={() => onEditTask(task)} // Assuming onEditTask might lead to data changes that need refresh
-                            onDeleteTask={() => { onDeleteTask(task.id); }}
+                            onDeleteTask={() => handleTaskDeleteClick(task)} // 修改为打开确认对话框
                             onToggleFrogStatus={() => { onToggleFrogStatus(task.id); }}
                             onAddTaskToTimeline={(t) => onAddTaskToTimeline(t)} // t is already the full task object
                             onPomodoroClick={() => onPomodoroClick(task.id, task.title)}
@@ -344,6 +362,18 @@ export function TodayFocusTasks({
                     </TabsContent>
                 </Tabs>
             </CardContent>
+
+            {/* 添加删除确认对话框 */}
+            <ConfirmDialog
+                open={isDeleteConfirmOpen}
+                onOpenChange={setIsDeleteConfirmOpen}
+                title="确认删除"
+                description={taskToDelete ? `确定要删除任务 "${taskToDelete.title}" 吗？此操作不可撤销。` : "确定要删除此任务吗？"}
+                confirmLabel="删除"
+                cancelLabel="取消"
+                onConfirm={handleDeleteConfirm}
+                variant="destructive"
+            />
         </Card>
     );
 } 

@@ -51,6 +51,7 @@ import {
   Task as DBTask,
   Goal as DBGoal
 } from "@/lib/db"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 interface Project extends Omit<DBProject, 'id' | 'createdAt' | 'updatedAt' | 'goalId'> {
   id: number;
@@ -112,6 +113,11 @@ export function ProjectsView() {
     dueDate?: Date;
   }>({ name: "" })
   const [editingProjectDueDate, setEditingProjectDueDate] = useState<Date | undefined>()
+
+  // 添加删除确认对话框状态
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [projectToDelete, setProjectToDelete] = useState<number | null>(null)
+  const [projectTitleToDelete, setProjectTitleToDelete] = useState("")
 
   const mapDBProjectToView = (dbProject: DBProject, goals: DBGoal[]): Project => {
     const associatedGoal = goals.find(g => g.id === dbProject.goalId);
@@ -318,7 +324,6 @@ export function ProjectsView() {
         isFrog: 0,
         isDeleted: 0,
         isRecurring: 0,
-        estimatedPomodoros: 0,
         actualPomodoros: 0,
         subtasks: [],
         tags: [],
@@ -359,18 +364,29 @@ export function ProjectsView() {
   };
 
   const deleteProject = async (id: number) => {
-    if (!window.confirm("确定要删除此项目及其所有任务吗？")) return;
+    const project = projects.find(p => p.id === id);
+    setProjectToDelete(id);
+    setProjectTitleToDelete(project?.name || "此项目");
+    setDeleteConfirmOpen(true);
+  };
+
+  // 确认删除项目的处理函数
+  const confirmDeleteProject = async () => {
+    if (!projectToDelete) return;
+    
     try {
-      const tasksToDelete = await getByIndex<DBTask>(ObjectStores.TASKS, 'byProjectId', id);
+      const tasksToDelete = await getByIndex<DBTask>(ObjectStores.TASKS, 'byProjectId', projectToDelete);
       for (const task of tasksToDelete) {
         if (task.id) await remove(ObjectStores.TASKS, task.id);
       }
-      await remove(ObjectStores.PROJECTS, id);
+      await remove(ObjectStores.PROJECTS, projectToDelete);
       fetchProjectsAndGoals();
-      if (selectedProject?.id === id) {
+      if (selectedProject?.id === projectToDelete) {
         setIsDetailDialogOpen(false);
         setSelectedProject(null);
       }
+      setProjectToDelete(null);
+      setProjectTitleToDelete("");
     } catch (error) {
       console.error("Failed to delete project:", error);
       setDbError("项目删除失败。");
@@ -878,6 +894,18 @@ export function ProjectsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 添加确认删除项目对话框 */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="确认删除项目"
+        description={`确定要删除项目"${projectTitleToDelete}"及其所有任务吗？`}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={confirmDeleteProject}
+        variant="destructive"
+      />
     </div>
   )
 }

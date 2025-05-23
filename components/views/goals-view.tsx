@@ -26,6 +26,7 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 import { add, getAll, update, remove, ObjectStores, Goal as DBGoal, DBMilestone, getMilestonesByGoalId, addMilestone, updateMilestone, deleteMilestone } from "@/lib/db"
 import { GoalFormFields, GoalFormData } from "@/components/goal/GoalFormFields"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 interface MilestoneViewItem {
   id: number;
@@ -96,6 +97,16 @@ export function GoalsView() {
   const [currentGoalIdForMilestone, setCurrentGoalIdForMilestone] = useState<number | null>(null)
   const [milestoneForm, setMilestoneForm] = useState<Partial<Omit<DBMilestone, 'id' | 'createdAt' | 'updatedAt' | 'goalId'>>>({ title: "", description: "", status: "pending", targetDate: undefined, })
   const [milestoneTargetDate, setMilestoneTargetDate] = useState<Date | undefined>()
+
+  // 添加删除确认对话框状态
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [goalToDelete, setGoalToDelete] = useState<number | null>(null)
+  const [goalTitleToDelete, setGoalTitleToDelete] = useState("")
+  
+  // 添加里程碑删除确认对话框状态
+  const [deleteMilestoneConfirmOpen, setDeleteMilestoneConfirmOpen] = useState(false)
+  const [milestoneToDelete, setMilestoneToDelete] = useState<{id: number, goalId: number} | null>(null)
+  const [milestoneTitleToDelete, setMilestoneTitleToDelete] = useState("")
 
   const fetchGoals = useCallback(async () => {
     setIsLoading(true)
@@ -179,20 +190,29 @@ export function GoalsView() {
   };
 
   const handleDeleteGoal = async (goalId: number) => {
-    if (!window.confirm("确定要删除这个目标吗？相关的项目和任务不会被删除。")) {
-      return;
-    }
+    const goal = goals.find(g => g.id === goalId);
+    setGoalToDelete(goalId);
+    setGoalTitleToDelete(goal?.name || "此目标");
+    setDeleteConfirmOpen(true);
+  }
+  
+  // 确认删除目标的处理函数
+  const confirmDeleteGoal = async () => {
+    if (!goalToDelete) return;
+    
     try {
-      await remove(ObjectStores.GOALS, goalId)
+      await remove(ObjectStores.GOALS, goalToDelete)
       fetchGoals()
-      if (selectedGoal && selectedGoal.id === goalId) {
+      if (selectedGoal && selectedGoal.id === goalToDelete) {
         setIsDetailDialogOpen(false);
         setSelectedGoal(null);
       }
-      if (editingGoal && editingGoal.id === goalId) {
+      if (editingGoal && editingGoal.id === goalToDelete) {
         setIsEditDialogOpen(false);
         setEditingGoal(null);
       }
+      setGoalToDelete(null);
+      setGoalTitleToDelete("");
     } catch (err) {
       console.error("Failed to delete goal:", err)
       setError("删除目标失败。")
@@ -362,10 +382,21 @@ export function GoalsView() {
   };
 
   const handleDeleteMilestone = async (milestoneId: number, goalId: number) => {
-    if (!window.confirm("确定要删除这个里程碑吗？")) return;
+    const milestone = currentGoalMilestones.find(m => m.id === milestoneId);
+    setMilestoneToDelete({id: milestoneId, goalId});
+    setMilestoneTitleToDelete(milestone?.title || "此里程碑");
+    setDeleteMilestoneConfirmOpen(true);
+  };
+
+  // 确认删除里程碑的处理函数
+  const confirmDeleteMilestone = async () => {
+    if (!milestoneToDelete) return;
+    
     try {
-      await deleteMilestone(milestoneId);
-      fetchMilestonesForGoal(goalId);
+      await deleteMilestone(milestoneToDelete.id);
+      fetchMilestonesForGoal(milestoneToDelete.goalId);
+      setMilestoneToDelete(null);
+      setMilestoneTitleToDelete("");
     } catch (err) {
       console.error("Failed to delete milestone:", err);
       setError("删除里程碑失败。");
@@ -711,6 +742,30 @@ export function GoalsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 添加确认删除目标对话框 */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="确认删除目标"
+        description={`确定要删除目标"${goalTitleToDelete}"吗？相关的项目和任务不会被删除。`}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={confirmDeleteGoal}
+        variant="destructive"
+      />
+
+      {/* 添加确认删除里程碑对话框 */}
+      <ConfirmDialog
+        open={deleteMilestoneConfirmOpen}
+        onOpenChange={setDeleteMilestoneConfirmOpen}
+        title="确认删除里程碑"
+        description={`确定要删除里程碑"${milestoneTitleToDelete}"吗？`}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={confirmDeleteMilestone}
+        variant="destructive"
+      />
 
     </div>
   )
