@@ -282,7 +282,17 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           actualStartTime: block.actualStartTime ? new Date(block.actualStartTime) : undefined,
           actualEndTime: block.actualEndTime ? new Date(block.actualEndTime) : undefined,
         } as TimelineUITimeBlock))
-        .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+        .sort((a, b) => {
+          // 1. 取排序用的开始时间
+          const aStart = a.isLogged && a.actualStartTime ? a.actualStartTime : a.startTime;
+          const bStart = b.isLogged && b.actualStartTime ? b.actualStartTime : b.startTime;
+          const startDiff = aStart.getTime() - bStart.getTime();
+          if (startDiff !== 0) return startDiff;
+          // 2. 若开始时间相同，取排序用的结束时间
+          const aEnd = a.isLogged && a.actualEndTime ? a.actualEndTime : a.endTime;
+          const bEnd = b.isLogged && b.actualEndTime ? b.actualEndTime : b.endTime;
+          return aEnd.getTime() - bEnd.getTime();
+        });
       
       setTimeBlocks(filteredAndProcessedBlocks);
 
