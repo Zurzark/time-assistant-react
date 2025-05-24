@@ -169,11 +169,19 @@ export function TimeLogView() {
   )
 
   const calculateDuration = (entry: TimeBlock): number => {
+    // 如果是已记录的条目（isLogged=1）且有明确设置的durationMinutes，优先使用
+    if (entry.isLogged === 1 && entry.durationMinutes !== undefined) {
+      return entry.durationMinutes;
+    }
+    
+    // 其次，尝试从实际开始/结束时间计算
     if (entry.actualStartTime && entry.actualEndTime) {
       const start = typeof entry.actualStartTime === 'string' ? parseISO(entry.actualStartTime) : entry.actualStartTime;
       const end = typeof entry.actualEndTime === 'string' ? parseISO(entry.actualEndTime) : entry.actualEndTime;
       return Math.round((end.getTime() - start.getTime()) / (1000 * 60)) // minutes
     }
+    
+    // 最后使用durationMinutes字段（对于计划条目）或默认为0
     return entry.durationMinutes || 0
   }
 

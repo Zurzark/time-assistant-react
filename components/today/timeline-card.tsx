@@ -598,8 +598,8 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </CardContent>
         <CardFooter className="pt-2 border-t">
-          <Button variant="outline" size="sm" className="w-full" disabled>
-            <PlusCircle className="mr-2 h-4 w-4" /> 添加时间块
+          <Button className="bg-primary text-primary-foreground hover:bg-primary/90 w-full" size="sm" disabled>
+            <Timer className="mr-2 h-4 w-4" /> 添加时间块
           </Button>
         </CardFooter>
       </Card>
@@ -621,8 +621,8 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
           </Button>
         </CardContent>
          <CardFooter className="pt-2 border-t">
-          <Button variant="outline" size="sm" className="w-full" onClick={handleOpenAddModal}>
-            <PlusCircle className="mr-2 h-4 w-4" /> 添加时间块
+          <Button className="bg-primary text-primary-foreground hover:bg-primary/90 w-full" size="sm" onClick={handleOpenAddModal}>
+            <Timer className="mr-2 h-4 w-4" /> 添加时间块
           </Button>
         </CardFooter>
       </Card>
@@ -639,8 +639,8 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-md font-medium">今日时间轴</CardTitle>
-          <Button variant="outline" size="sm" onClick={handleOpenAddModal} disabled={loading} className="ml-auto">
-            <Plus className="mr-1.5 h-4 w-4" /> 添加时间块
+          <Button className="bg-primary text-primary-foreground hover:bg-primary/90 ml-auto" size="sm" onClick={handleOpenAddModal} disabled={loading}>
+            <Timer className="mr-1.5 h-4 w-4" /> 添加时间块
           </Button>
         </div>
         <CardDescription>您今日的日程安排 {loading && timeBlocks.length > 0 && "(更新中...)"}</CardDescription>

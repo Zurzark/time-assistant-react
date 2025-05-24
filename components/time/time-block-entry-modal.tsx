@@ -153,26 +153,41 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
         }
       
         let initialUserInputDurationMinutes = "";
-        // Use `mode` prop for initial setup decisions related to `initialData`
-        if (isLogMode(currentInternalMode)) {
-          if ((currentInternalMode === 'log-edit' || (currentInternalMode === 'plan-to-log' && initialData?.id)) && initialData?.durationMinutes !== undefined) {
-            initialUserInputDurationMinutes = initialData.durationMinutes.toString();
-            isDurationManuallySetRef.current = true;
+        
+        // 直接检查是否存在durationMinutes字段，不再嵌套在isLogMode条件中
+        if (initialData?.durationMinutes !== undefined) {
+          console.log("Using explicit durationMinutes from initialData:", initialData.durationMinutes);
+          initialUserInputDurationMinutes = initialData.durationMinutes.toString();
+          isDurationManuallySetRef.current = true;
+        } 
+        // 不存在durationMinutes字段时，再根据模式计算默认值
+        else if (isLogMode(currentInternalMode)) {
+          const sDate = combineDateTime(defaultDate, format(defaultStartTime, "HH:mm"));
+          const eDate = combineDateTime(defaultDate, format(defaultEndTime, "HH:mm"));
+          if (sDate && eDate && eDate >= sDate) {
+            initialUserInputDurationMinutes = differenceInMinutes(eDate, sDate).toString();
           } else {
-            const sDate = combineDateTime(defaultDate, format(defaultStartTime, "HH:mm"));
-            const eDate = combineDateTime(defaultDate, format(defaultEndTime, "HH:mm"));
-            if (sDate && eDate && eDate >= sDate) {
-              initialUserInputDurationMinutes = differenceInMinutes(eDate, sDate).toString();
-            } else {
-              initialUserInputDurationMinutes = "0";
+            initialUserInputDurationMinutes = "0";
+          }
+          isDurationManuallySetRef.current = false;
+        }
+        
+        // 尝试从taskId获取默认活动分类ID
+        let defaultActivityCategoryId = initialData?.activityCategoryId?.toString() || "";
+        if (!defaultActivityCategoryId && initialData?.taskId) {
+          const taskId = typeof initialData.taskId === 'string' ? initialData.taskId : initialData.taskId.toString();
+          if (taskId !== "_none_") {
+            const task = tasks.find(t => t.id?.toString() === taskId);
+            if (task && task.defaultActivityCategoryId !== undefined) {
+              console.log(`从任务 "${task.title}" 获取默认活动分类ID: ${task.defaultActivityCategoryId}`);
+              defaultActivityCategoryId = task.defaultActivityCategoryId?.toString() || "";
             }
-            isDurationManuallySetRef.current = false;
           }
         }
 
         return {
           title: initialData?.title || "",
-          activityCategoryId: initialData?.activityCategoryId?.toString() || "",
+          activityCategoryId: defaultActivityCategoryId,
           taskId: initialData?.taskId?.toString() || "",
           date: defaultDate,
           startTime: format(defaultStartTime, "HH:mm"),
@@ -185,21 +200,26 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
       const newFormData = getInitialValues();
       setFormData(newFormData);
       hasInitializedRef.current = true;
-      // Reset internal mode to the passed mode prop when modal opens
-      setCurrentInternalMode(mode);
+      // 如果是创建模式且允许切换，默认显示直接记录页签
+      if (mode === "plan-create" && allowCreationModeSwitch) {
+        setCurrentInternalMode("log-create");
+      } else {
+        setCurrentInternalMode(mode);
+      }
       
       console.log("Modal initialized with:", 
         newFormData.startTime, 
         newFormData.endTime, 
         "Mode:", mode,
         "Internal Mode:", currentInternalMode,
-        "Initial Duration Input:", newFormData.userInputDurationMinutes
+        "Initial Duration Input:", newFormData.userInputDurationMinutes,
+        "Raw durationMinutes from initialData:", initialData?.durationMinutes
       );
     } else if (!isOpen) {
       // 当模态框关闭时，重置初始化标志
       hasInitializedRef.current = false;
     }
-  }, [isOpen]); // 只在isOpen变化时触发，其他依赖项通过函数闭包访问最新值
+  }, [isOpen, initialData]); // 添加initialData为依赖项，确保当初始数据变化时重新计算
 
   const modalConfig = useMemo(() => {
     switch (currentInternalMode) {
@@ -229,6 +249,15 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
 
   const handleSelectChange = (name: keyof FormData) => (value: string) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // 当选择任务时，自动设置对应的活动分类（如果任务有默认活动分类）
+    if (name === "taskId" && value && value !== "_none_") {
+      const selectedTask = tasks.find(task => task.id?.toString() === value);
+      if (selectedTask && selectedTask.defaultActivityCategoryId !== undefined) {
+        console.log(`自动设置活动分类: 任务 "${selectedTask.title}" 的默认分类ID: ${selectedTask.defaultActivityCategoryId}`);
+        setFormData(prev => ({ ...prev, activityCategoryId: selectedTask.defaultActivityCategoryId?.toString() || "" }));
+      }
+    }
   };
 
   const handleDurationInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,6 +334,20 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
       return;
     }
   
+    console.log("Duration sync effect running, isDurationManuallySet:", isDurationManuallySetRef.current);
+    console.log("Current userInputDurationMinutes:", formData.userInputDurationMinutes);
+    console.log("initialData?.durationMinutes:", initialData?.durationMinutes);
+  
+    // 如果是初次渲染且有明确设置的durationMinutes，永远优先使用它
+    if (initialData?.durationMinutes !== undefined && !formData.userInputDurationMinutes) {
+      setFormData(prev => ({
+        ...prev,
+        userInputDurationMinutes: String(initialData.durationMinutes)
+      }));
+      isDurationManuallySetRef.current = true;
+      return;
+    }
+  
     const currentMaxAllowedDuration = calendarTimeInfo.isNegative ? 0 : calendarTimeInfo.minutes;
   
     if (isDurationManuallySetRef.current) {
@@ -332,7 +375,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
         userInputDurationMinutes: currentMaxAllowedDuration.toString(),
       }));
     }
-  }, [isOpen, currentInternalMode, calendarTimeInfo, formData.userInputDurationMinutes, toast]); // formData.userInputDurationMinutes is needed to re-evaluate if it was changed by other means or needs validation against new calendarTimeInfo
+  }, [isOpen, currentInternalMode, calendarTimeInfo, formData.userInputDurationMinutes, toast, initialData?.durationMinutes]); // formData.userInputDurationMinutes is needed to re-evaluate if it was changed by other means or needs validation against new calendarTimeInfo
 
   const validateForm = (): boolean => {
     const errors: Partial<Record<keyof FormData | 'userInputDurationMinutes', string>> = {};
@@ -381,7 +424,7 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
     setIsLoading(true);
     
     // 打印提交前的表单状态，确认时间没有被修改
-    console.log("FormData at submit:", formData.startTime, formData.endTime);
+    console.log("FormData at submit:", formData.startTime, formData.endTime, "duration:", formData.userInputDurationMinutes);
     
     const startDateTime = combineDateTime(formData.date, formData.startTime)!;
     const endDateTime = combineDateTime(formData.date, formData.endTime)!;
@@ -457,30 +500,27 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
       }
     }
     
-    const relevantStartTime = finalDbPayload.isLogged === 1 ? finalDbPayload.actualStartTime! : finalDbPayload.startTime! ;
-    const relevantEndTime = finalDbPayload.isLogged === 1 ? finalDbPayload.actualEndTime! : finalDbPayload.endTime!;
-    // 确保 relevantStartTime 和 relevantEndTime 不是 undefined 才进行计算
-    let durationMins: number | undefined = undefined;
-
+    // 针对日志类型条目，直接使用用户输入的时长
     if (isLogMode(currentInternalMode)) {
-        const parsedDuration = parseInt(formData.userInputDurationMinutes, 10);
-        // Validation should ensure it's a valid number by this point.
-        // Defaulting to 0 if somehow invalid, though submit should be blocked.
-        durationMins = (!isNaN(parsedDuration) && parsedDuration >= 0) ? parsedDuration : 0;
-    } else { // Plan modes
-        if (relevantStartTime && relevantEndTime) {
-            const diff = differenceInMinutes(relevantEndTime, relevantStartTime);
-            if (diff >= 0) {
-                durationMins = diff;
-            } else {
-                durationMins = 0; // Duration cannot be negative for plans either
-            }
-        } else {
-            durationMins = 0; // Default if times are invalid
-        }
+      const parsedDuration = parseInt(formData.userInputDurationMinutes, 10);
+      // 确保是有效数字，否则回退到默认计算
+      if (!isNaN(parsedDuration) && parsedDuration >= 0) {
+        console.log("Using user input duration:", parsedDuration);
+        finalDbPayload.durationMinutes = parsedDuration;
+      } else {
+        // 如果用户输入无效，使用计算值
+        const relevantStartTime = finalDbPayload.actualStartTime!;
+        const relevantEndTime = finalDbPayload.actualEndTime!;
+        const diff = differenceInMinutes(relevantEndTime, relevantStartTime);
+        finalDbPayload.durationMinutes = diff >= 0 ? diff : 0;
+      }
+    } else {
+      // 计划条目的时长计算
+      const relevantStartTime = finalDbPayload.startTime! ;
+      const relevantEndTime = finalDbPayload.endTime!;
+      const diff = differenceInMinutes(relevantEndTime, relevantStartTime);
+      finalDbPayload.durationMinutes = diff >= 0 ? diff : 0;
     }
-    finalDbPayload.durationMinutes = durationMins;
-
 
     try {
       let savedTimeBlock: TimeBlock;
@@ -556,8 +596,8 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
             className="w-full pt-2 pb-0"
           >
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="plan-create">创建计划</TabsTrigger>
               <TabsTrigger value="log-create">直接记录</TabsTrigger>
+              <TabsTrigger value="plan-create">创建计划</TabsTrigger>
             </TabsList>
           </Tabs>
         )}
@@ -725,6 +765,8 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
                     <div className="col-start-2 col-span-3 text-xs text-muted-foreground">
                       日历时长: {calendarTimeInfo.display}
                       {calendarTimeInfo.isNegative && <span className="text-orange-600"> (结束时间早于开始时间)</span>}
+                      {/* 添加调试信息 */}
+                      <span className="hidden">{JSON.stringify({userInput: formData.userInputDurationMinutes, initialDataDuration: initialData?.durationMinutes})}</span>
                     </div>
                 </div>
                 {formErrors.userInputDurationMinutes && (
