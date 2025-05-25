@@ -1,16 +1,18 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
-import { Play, Pause, SkipForward, RefreshCw, CheckCircle2, Volume2, VolumeX, Maximize2, Loader2, AlertCircle } from "lucide-react"
+import { Play, Pause, SkipForward, RefreshCw, CheckCircle2, Volume2, VolumeX, Maximize2, Loader2, AlertCircle, Minus, X } from "lucide-react"
 import { type Task as DBTask, type Session as DBSession, ObjectStores, getAll, add as addToDB, update as updateDB } from "@/lib/db"
 import { cn } from "@/lib/utils"
 import { usePomodoroSettings, getCurrentBackgroundSoundPath } from "@/lib/pomodoro-settings"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
+import React from "react"
 
 // --- 从 pomodoro-card.tsx 借鉴或重新定义的 SVG Icon Components ---
 // Play Icon
@@ -49,6 +51,27 @@ interface PomodoroModalProps {
   onOpenChange: (open: boolean) => void
   initialTask: { id: string | number; title: string } | null
 }
+
+// 不带默认关闭按钮的 DialogContent
+const DialogContentNoClose = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ className, children, ...props }, ref) => (
+  <DialogPrimitive.Portal>
+    <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+    <DialogPrimitive.Content
+      ref={ref}
+      className={cn(
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </DialogPrimitive.Content>
+  </DialogPrimitive.Portal>
+));
+DialogContentNoClose.displayName = "DialogContentNoClose";
 
 export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModalProps) {
   const settings = usePomodoroSettings();
@@ -449,173 +472,286 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
     };
   }, [open, isActive, mode, time]);
 
+  const [isMinimized, setIsMinimized] = useState(false);
+
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => {
-      onOpenChange(isOpen)
-      if (!isOpen && isActive) {
-        setIsActive(false) // Stop timer if modal is closed
-      }
-    }}>
-      <DialogContent className={`sm:max-w-md ${focusMode ? "sm:max-w-xl md:sm:max-w-2xl" : ""} transition-all duration-300 ease-in-out`}>
-        <DialogHeader>
-          <DialogTitle className="text-center text-2xl font-semibold">专注计时</DialogTitle>
-          {!focusMode && <DialogDescription className="text-center">使用番茄工作法提高工作效率。</DialogDescription>}
-        </DialogHeader>
-
-        <div className={`flex flex-col items-center ${focusMode ? "py-10 px-6" : "py-6 px-4"} space-y-6`}>
-          {!focusMode && (
-            <div className="w-full max-w-xs">
-              <p className="text-sm font-medium text-slate-600 mb-1 text-center">
-                当前任务: <span className={cn("font-semibold", currentTheme.text)}>{dbTasks.find(t => t.id === selectedTaskId)?.title || "未选择任务"}</span>
-              </p>
-              {loadingTasks ? (
-                <div className="flex items-center justify-center h-10"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
-              ) : loadTasksError ? (
-                <div className="flex items-center justify-center h-10 text-red-500"><AlertCircle className="h-5 w-5 mr-2" /> {loadTasksError}</div>
-              ) : (
-                <Select 
-                  value={selectedTaskId?.toString() || ""} 
-                  onValueChange={(value) => setSelectedTaskId(value ? Number(value) : null)}
-                >
-                  <SelectTrigger className={cn("w-full", mode === "work" ? "focus:ring-red-400 border-slate-300" : "focus:ring-green-400 border-slate-300")}>
-                    <SelectValue placeholder="选择或切换任务" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {dbTasks.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">没有可用的任务</p>}
-                    {dbTasks.map((task) => (
-                      <SelectItem key={task.id} value={String(task.id!)}>
-                        {task.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-          )}
-
-          <div className={`relative ${focusMode ? "w-72 h-72" : "w-56 h-56"}`}> 
-            <svg className="absolute top-0 left-0 w-full h-full" viewBox="0 0 100 100"> 
-              <circle cx="50" cy="50" r="45" fill="none" stroke="#E5E7EB" strokeWidth="5" />
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                fill="none"
-                stroke={currentTheme.progress}
-                strokeWidth="6" 
-                strokeDasharray={2 * Math.PI * 45} 
-                strokeDashoffset={(2 * Math.PI * 45) - (timerProgress / 100) * (2 * Math.PI * 45)}
-                strokeLinecap="round"
-                transform="rotate(-90 50 50)"
-                className="transition-all duration-1000 ease-linear"
-              />
-            </svg>
-            <div className={cn("absolute inset-0 flex flex-col items-center justify-center", currentTheme.text)}>
-              <span className={`font-bold tracking-tighter ${focusMode ? "text-7xl" : "text-6xl"}`}>
-                {formatTime(time)}
-              </span>
-              <span className={`font-medium mt-1 ${focusMode ? "text-lg" : "text-sm"}`}>
-                {timerStatusText()}
-              </span>
-            </div>
+    <>
+      {/* 最小化时只显示悬浮窗 */}
+      {isMinimized && (
+        <MiniPomodoroWidget
+          time={time}
+          mode={mode}
+          isActive={isActive}
+          currentTask={dbTasks.find(t => t.id === selectedTaskId)?.title || "未选择任务"}
+          onRestore={() => setIsMinimized(false)}
+          onPause={() => setIsActive(false)}
+          onResume={() => setIsActive(true)}
+        />
+      )}
+      {/* 只有未最小化时才显示 Dialog */}
+      <Dialog open={open && !isMinimized} onOpenChange={(isOpen) => {
+        onOpenChange(isOpen)
+        if (!isOpen && isActive) {
+          setIsActive(false) // Stop timer if modal is closed
+        }
+        if (!isOpen) setIsMinimized(false); // 关闭时重置最小化状态
+      }}>
+        <DialogContentNoClose
+          className={`sm:max-w-md ${focusMode ? "sm:max-w-xl md:sm:max-w-2xl" : ""} transition-all duration-300 ease-in-out`}
+          onInteractOutside={e => {
+            e.preventDefault();
+            setIsMinimized(true);
+          }}
+        >
+          {/* 右上角最小化+关闭按钮同排 */}
+          <div className="absolute right-4 top-4 flex flex-row items-center space-x-2 z-20">
+            <Button variant="ghost" size="icon" onClick={() => setIsMinimized(true)} title="最小化">
+              <Minus className="h-5 w-5" />
+            </Button>
+            <DialogClose asChild>
+              <Button variant="ghost" size="icon" title="关闭">
+                <X className="h-5 w-5" />
+              </Button>
+            </DialogClose>
           </div>
-          
-          <div className="flex justify-center space-x-1.5">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className={cn("transform transition-transform duration-300", completedAnimation && i < pomodoroCount ? "animate-bounce-once" : "")}>
-                  <PomodoroCounterIcon filled={i < pomodoroCount} className={focusMode ? "w-7 h-7" : "w-5 h-5"} />
+          <DialogHeader>
+            <DialogTitle className="text-center text-2xl font-semibold">专注计时</DialogTitle>
+            {!focusMode && <DialogDescription className="text-center">使用番茄工作法提高工作效率。</DialogDescription>}
+          </DialogHeader>
+
+          <div className={`flex flex-col items-center ${focusMode ? "py-10 px-6" : "py-6 px-4"} space-y-6`}>
+            {!focusMode && (
+              <div className="w-full max-w-xs">
+                <p className="text-sm font-medium text-slate-600 mb-1 text-center">
+                  当前任务: <span className={cn("font-semibold", currentTheme.text)}>{dbTasks.find(t => t.id === selectedTaskId)?.title || "未选择任务"}</span>
+                </p>
+                {loadingTasks ? (
+                  <div className="flex items-center justify-center h-10"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
+                ) : loadTasksError ? (
+                  <div className="flex items-center justify-center h-10 text-red-500"><AlertCircle className="h-5 w-5 mr-2" /> {loadTasksError}</div>
+                ) : (
+                  <Select 
+                    value={selectedTaskId?.toString() || ""} 
+                    onValueChange={(value) => setSelectedTaskId(value ? Number(value) : null)}
+                  >
+                    <SelectTrigger className={cn("w-full", mode === "work" ? "focus:ring-red-400 border-slate-300" : "focus:ring-green-400 border-slate-300")}>
+                      <SelectValue placeholder="选择或切换任务" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dbTasks.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">没有可用的任务</p>}
+                      {dbTasks.map((task) => (
+                        <SelectItem key={task.id} value={String(task.id!)}>
+                          {task.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
-            ))}
-          </div>
-          <style jsx global>{`
-            @keyframes bounce-once {
-              0%, 100% { transform: translateY(0); }
-              50% { transform: translateY(-8px); }
-            }
-            .animate-bounce-once {
-              animation: bounce-once 0.5s ease-in-out;
-            }
-          `}</style>
+            )}
 
-          <div className={`flex items-center ${focusMode ? "space-x-6" : "space-x-3"}`}>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn("h-11 w-11 text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700", focusMode ? "h-14 w-14" : "")}
-              onClick={resetTimerLogic}
-              disabled={isActionDisabled}
-              title="重置"
-            >
-              <RefreshCw className={focusMode ? "h-7 w-7" : "h-5 w-5"} />
-            </Button>
-            <Button
-              variant="default"
-              size="lg" 
-              onClick={toggleTimer}
-              disabled={isActionDisabled}
-              className={cn(
-                "min-w-[100px] text-white transition-all duration-300 transform active:scale-95 rounded-full",
-                focusMode ? "h-20 w-20 text-lg px-4 py-2" : "h-16 w-16", 
-                isActive
-                    ? (mode === "work" ? "bg-amber-500 hover:bg-amber-600 focus-visible:ring-amber-500" : "bg-teal-500 hover:bg-teal-600 focus-visible:ring-teal-500") 
-                    : currentTheme.button,
-                stateTransitionRef.current ? "opacity-50 cursor-not-allowed" : ""
-              )}
-            >
-              {isActive ? <PauseIcon className={focusMode ? "h-8 w-8" : "h-6 w-6"} /> : <PlayIcon className={focusMode ? "h-8 w-8" : "h-6 w-6"} />}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn("h-11 w-11 text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700", focusMode ? "h-14 w-14" : "")}
-              onClick={skipTimerLogic}
-              disabled={isActionDisabled} 
-              title="跳过当前"
-            >
-              <SkipForward className={focusMode ? "h-7 w-7" : "h-5 w-5"} />
-            </Button>
-          </div>
-          
-          {mode === 'work' && (
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={completePomodoroAction}
-                disabled={isActionDisabled} 
+            <div className={`relative ${focusMode ? "w-72 h-72" : "w-56 h-56"}`}> 
+              <svg className="absolute top-0 left-0 w-full h-full" viewBox="0 0 100 100"> 
+                <circle cx="50" cy="50" r="45" fill="none" stroke="#E5E7EB" strokeWidth="5" />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="45"
+                  fill="none"
+                  stroke={currentTheme.progress}
+                  strokeWidth="6" 
+                  strokeDasharray={2 * Math.PI * 45} 
+                  strokeDashoffset={(2 * Math.PI * 45) - (timerProgress / 100) * (2 * Math.PI * 45)}
+                  strokeLinecap="round"
+                  transform="rotate(-90 50 50)"
+                  className="transition-all duration-1000 ease-linear"
+                />
+              </svg>
+              <div className={cn("absolute inset-0 flex flex-col items-center justify-center", currentTheme.text)}>
+                <span className={`font-bold tracking-tighter ${focusMode ? "text-7xl" : "text-6xl"}`}>
+                  {formatTime(time)}
+                </span>
+                <span className={`font-medium mt-1 ${focusMode ? "text-lg" : "text-sm"}`}>
+                  {timerStatusText()}
+                </span>
+              </div>
+            </div>
+            
+            <div className="flex justify-center space-x-1.5">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className={cn("transform transition-transform duration-300", completedAnimation && i < pomodoroCount ? "animate-bounce-once" : "")}>
+                    <PomodoroCounterIcon filled={i < pomodoroCount} className={focusMode ? "w-7 h-7" : "w-5 h-5"} />
+                </div>
+              ))}
+            </div>
+            <style jsx global>{`
+              @keyframes bounce-once {
+                0%, 100% { transform: translateY(0); }
+                50% { transform: translateY(-8px); }
+              }
+              .animate-bounce-once {
+                animation: bounce-once 0.5s ease-in-out;
+              }
+            `}</style>
+
+            <div className={`flex items-center ${focusMode ? "space-x-6" : "space-x-3"}`}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-11 w-11 text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700", focusMode ? "h-14 w-14" : "")}
+                onClick={resetTimerLogic}
+                disabled={isActionDisabled}
+                title="重置"
+              >
+                <RefreshCw className={focusMode ? "h-7 w-7" : "h-5 w-5"} />
+              </Button>
+              <Button
+                variant="default"
+                size="lg" 
+                onClick={toggleTimer}
+                disabled={isActionDisabled}
                 className={cn(
-                    "min-w-[100px] transition-all duration-300 transform active:scale-95 mt-3",
-                    currentTheme.buttonOutline,
-                    focusMode ? "py-3 px-5 text-base" : ""
+                  "min-w-[100px] text-white transition-all duration-300 transform active:scale-95 rounded-full",
+                  focusMode ? "h-20 w-20 text-lg px-4 py-2" : "h-16 w-16", 
+                  isActive
+                      ? (mode === "work" ? "bg-amber-500 hover:bg-amber-600 focus-visible:ring-amber-500" : "bg-teal-500 hover:bg-teal-600 focus-visible:ring-teal-500") 
+                      : currentTheme.button,
+                  stateTransitionRef.current ? "opacity-50 cursor-not-allowed" : ""
                 )}
               >
-                <HarvestedTomatoIcon className={cn("mr-1.5", focusMode ? "w-5 h-5" : "w-4 h-4")} />
-                完成此轮
-            </Button>
-          )}
-
-          {!focusMode && (
-            <div className="w-full max-w-xs space-y-4 pt-4 border-t border-slate-200 dark:border-slate-700 mt-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Maximize2 className="h-5 w-5 text-slate-600 dark:text-slate-400" />
-                  <Label htmlFor="focus-mode" className="text-slate-700 dark:text-slate-300">专注模式</Label>
-                </div>
-                <Switch id="focus-mode" checked={focusMode} onCheckedChange={setFocusMode} />
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  {isMuted ? <VolumeX className="h-5 w-5 text-slate-600 dark:text-slate-400" /> : <Volume2 className="h-5 w-5 text-slate-600 dark:text-slate-400" />}
-                  <Label htmlFor="modal-mute-sound" className="text-slate-700 dark:text-slate-300">静音</Label>
-                </div>
-                <Switch id="modal-mute-sound" checked={isMuted} onCheckedChange={setIsMuted} />
-              </div>
+                {isActive ? <PauseIcon className={focusMode ? "h-8 w-8" : "h-6 w-6"} /> : <PlayIcon className={focusMode ? "h-8 w-8" : "h-6 w-6"} />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-11 w-11 text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700", focusMode ? "h-14 w-14" : "")}
+                onClick={skipTimerLogic}
+                disabled={isActionDisabled} 
+                title="跳过当前"
+              >
+                <SkipForward className={focusMode ? "h-7 w-7" : "h-5 w-5"} />
+              </Button>
             </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+            
+            {mode === 'work' && (
+              <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={completePomodoroAction}
+                  disabled={isActionDisabled} 
+                  className={cn(
+                      "min-w-[100px] transition-all duration-300 transform active:scale-95 mt-3",
+                      currentTheme.buttonOutline,
+                      focusMode ? "py-3 px-5 text-base" : ""
+                  )}
+                >
+                  <HarvestedTomatoIcon className={cn("mr-1.5", focusMode ? "w-5 h-5" : "w-4 h-4")} />
+                  完成此轮
+              </Button>
+            )}
+
+            {!focusMode && (
+              <div className="w-full max-w-xs space-y-4 pt-4 border-t border-slate-200 dark:border-slate-700 mt-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Maximize2 className="h-5 w-5 text-slate-600 dark:text-slate-400" />
+                    <Label htmlFor="focus-mode" className="text-slate-700 dark:text-slate-300">专注模式</Label>
+                  </div>
+                  <Switch id="focus-mode" checked={focusMode} onCheckedChange={setFocusMode} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    {isMuted ? <VolumeX className="h-5 w-5 text-slate-600 dark:text-slate-400" /> : <Volume2 className="h-5 w-5 text-slate-600 dark:text-slate-400" />}
+                    <Label htmlFor="modal-mute-sound" className="text-slate-700 dark:text-slate-300">静音</Label>
+                  </div>
+                  <Switch id="modal-mute-sound" checked={isMuted} onCheckedChange={setIsMuted} />
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContentNoClose>
+      </Dialog>
+    </>
   )
 }
+
+// 右下角悬浮窗组件
+interface MiniPomodoroWidgetProps {
+  time: number;
+  mode: "work" | "shortBreak" | "longBreak";
+  isActive: boolean;
+  currentTask: string;
+  onRestore: () => void;
+  onPause: () => void;
+  onResume: () => void;
+}
+const MiniPomodoroWidget: React.FC<MiniPomodoroWidgetProps> = ({ time, mode, isActive, currentTask, onRestore, onPause, onResume }) => {
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }
+  const modeText = mode === "work" ? "专注" : mode === "shortBreak" ? "小憩" : "长休";
+  const modeColor = mode === "work" ? "text-red-500 dark:text-red-400" : "text-green-500 dark:text-green-400";
+
+  // 脉冲动画，仅在激活时
+  const pulseAnimation = isActive ? "animate-pulse-border" : "";
+
+  return (
+    <div
+      className={cn(
+        "fixed z-[9999] right-6 bottom-6 flex items-center justify-between",
+        "bg-slate-50/90 dark:bg-slate-800/90 backdrop-blur-sm",
+        "rounded-2xl",
+        "p-4 space-x-3",
+        "border border-transparent",
+        pulseAnimation,
+        "shadow-[0_4px_14px_0_rgb(199,210,254,0.7)] dark:shadow-[0_4px_14px_0_rgb(100,116,139,0.5)]" // 浅蓝色投影，深色模式下为稍暗的蓝色投影
+      )}
+      style={{ 
+        width: '360px', // 用户已调整
+        height: '120px', // 用户已调整
+      }}
+    >
+      <div className="flex flex-col justify-center">
+        <span className="font-semibold text-4xl text-slate-800 dark:text-slate-100">
+          {formatTime(time)}
+        </span>
+        <div className="flex items-center space-x-1.5 mt-1"> 
+          <span className={cn("text-base font-medium", modeColor)}>{modeText}</span>
+          <span className="truncate max-w-[180px] text-base text-slate-600 dark:text-slate-400" title={currentTask}> 
+            {currentTask || "未关联任务"}
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center space-x-1">
+        {isActive ? (
+          <Button size="icon" variant="ghost" onClick={onPause} title="暂停" className="w-11 h-11 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
+            <Pause className="h-7 w-7 text-slate-700 dark:text-slate-300" />
+          </Button>
+        ) : (
+          <Button size="icon" variant="ghost" onClick={onResume} title="继续" className="w-11 h-11 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
+            <Play className="h-7 w-7 text-slate-700 dark:text-slate-300" />
+          </Button>
+        )}
+        <Button size="icon" variant="ghost" onClick={onRestore} title="还原" className="w-11 h-11 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700">
+          <Maximize2 className="h-7 w-7 text-slate-700 dark:text-slate-300" />
+        </Button>
+      </div>
+      <style jsx global>{`
+        @keyframes pulse-border-animation {
+          0%, 100% { border-color: transparent; }
+          50% { 
+            border-color: ${mode === "work" ? "rgba(255, 99, 71, 0.7)" : "rgba(60, 179, 113, 0.7)"};
+          }
+        }
+        .animate-pulse-border {
+          animation: pulse-border-animation 2s infinite;
+        }
+      `}</style>
+    </div>
+  );
+};
 
 export default PomodoroModal
 
