@@ -35,6 +35,7 @@ import { useTaskSelection } from "./tasks-view/hooks/useTaskSelection";
 import { ActiveTasksDisplay } from "./tasks-view/ActiveTasksDisplay";
 import { Task } from "@/lib/task-utils";
 import { SelectTimeRangeModal } from "./SelectTimeRangeModal";
+import { usePomodoroController } from "@/components/pomodoro/pomodoro-context"
 
 export function TasksView() {
   // --- Main Data and DB interactions ---
@@ -122,8 +123,7 @@ export function TasksView() {
   const [isPermanentDeleteConfirmOpen, setIsPermanentDeleteConfirmOpen] = useState(false);
   const [taskToPermanentlyDeleteIdConfirm, setTaskToPermanentlyDeleteIdConfirm] = useState<number | null>(null);
 
-  const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false);
-  // selectedTaskForPomodoro comes from useTaskData
+  const { openPomodoroForTask } = usePomodoroController();
 
   // --- Effects for Modal Control based on data state ---
   useEffect(() => {
@@ -132,10 +132,10 @@ export function TasksView() {
 
   useEffect(() => {
     if (selectedTaskForPomodoro) {
-      setPomodoroModalOpen(true);
+      openPomodoroForTask(selectedTaskForPomodoro.id, selectedTaskForPomodoro.title);
     }
     // Modal controls its own closure, or reset selectedTaskForPomodoro to close it
-  }, [selectedTaskForPomodoro]);
+  }, [selectedTaskForPomodoro, openPomodoroForTask]);
 
   // --- Callbacks for UI interaction ---
   const resetCreateTaskForm = useCallback(() => {
@@ -195,7 +195,7 @@ export function TasksView() {
   };
 
   const handlePomodoroClickFromItem = (taskId: number, taskTitle: string) => {
-    setSelectedTaskForPomodoro({ id: String(taskId), title: taskTitle });
+    openPomodoroForTask(taskId, taskTitle);
   };
 
   // --- Lifecycle Effect for loading initial data for trash view ---
@@ -346,29 +346,18 @@ export function TasksView() {
         </div>
       </div>
 
-      <PomodoroModal
-        open={pomodoroModalOpen}
+      <EditTaskDialog
+        open={isEditModalOpen}
         onOpenChange={(isOpen) => {
-          setPomodoroModalOpen(isOpen);
-          if (!isOpen) setSelectedTaskForPomodoro(null);
+          setIsEditModalOpen(isOpen);
+          if (!isOpen) setTaskToEdit(null);
         }}
-        initialTask={selectedTaskForPomodoro}
+        task={taskToEdit}
+        onSave={handleActualUpdateTask}
+        availableProjects={projectList}
+        onCreateNewProject={handleCreateNewProject} // from useTaskData
+        availableActivityCategories={[]}
       />
-
-      {taskToEdit && ( // Ensure taskToEdit is not null before rendering EditTaskDialog
-          <EditTaskDialog
-            open={isEditModalOpen}
-            onOpenChange={(isOpen) => {
-              setIsEditModalOpen(isOpen);
-              if (!isOpen) setTaskToEdit(null);
-            }}
-            task={taskToEdit}
-            onSave={handleActualUpdateTask}
-            availableProjects={projectList}
-            onCreateNewProject={handleCreateNewProject} // from useTaskData
-          />
-      )}
-
 
       <ConfirmationDialog
         open={isConfirmDeleteDialogOpen}

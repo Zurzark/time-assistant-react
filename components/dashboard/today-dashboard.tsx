@@ -18,11 +18,10 @@ import { toast } from "sonner"; // 导入 toast 用于提示
 // Import useTaskData and SelectTimeRangeModal
 import { useTaskData } from "@/components/task/tasks-view/hooks/useTaskData";
 import { SelectTimeRangeModal } from "@/components/task/SelectTimeRangeModal";
+import { usePomodoroController } from "@/components/pomodoro/pomodoro-context"
 
 export function TodayDashboard() {
   const [timeRange, setTimeRange] = useState("today")
-  const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false)
-  const [selectedTaskForPomodoro, setSelectedTaskForPomodoro] = useState<{ id: number; title: string } | null>(null)
   const [isUnifiedAddModalOpen, setIsUnifiedAddModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<TaskUtilsTask | null>(null)
   const [todayFocusRefreshKey, setTodayFocusRefreshKey] = useState(0)
@@ -36,6 +35,8 @@ export function TodayDashboard() {
     handleConfirmTimeRangeAndAddTask,
     // We might need other things from useTaskData if interaction is deeper, but for now, this is minimal.
   } = useTaskData();
+
+  const { openPomodoroForTask } = usePomodoroController();
 
   const today = new Date()
   const formattedDate = today.toLocaleDateString("zh-CN", {
@@ -58,8 +59,7 @@ export function TodayDashboard() {
   };
 
   const handlePomodoroClick = (taskId: number, taskTitle: string) => {
-    setSelectedTaskForPomodoro({ id: taskId, title: taskTitle })
-    setPomodoroModalOpen(true)
+    openPomodoroForTask(taskId, taskTitle)
   }
 
   const triggerTodayFocusRefresh = () => {
@@ -212,7 +212,6 @@ export function TodayDashboard() {
           </div>
         </div>
 
-        <PomodoroModal open={pomodoroModalOpen} onOpenChange={setPomodoroModalOpen} initialTask={selectedTaskForPomodoro} />
         <UnifiedAddModal 
           open={isUnifiedAddModalOpen} 
           onOpenChange={setIsUnifiedAddModalOpen} 

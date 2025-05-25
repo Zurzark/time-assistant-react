@@ -469,12 +469,17 @@ export const TimeBlockEntryModal: React.FC<TimeBlockEntryModalProps> = ({
         actualEndTime: undefined,
       };
     } else { // log-create, log-edit, plan-to-log
+      // 修正：如果原始sourceType为pomodoro_log，则保持为pomodoro_log，否则为time_log
+      let determinedSourceType = 'time_log';
+      if (initialData?.sourceType === 'pomodoro_log') {
+        determinedSourceType = 'pomodoro_log';
+      }
       finalDbPayload = {
         ...commonPayload,
         actualStartTime: startDateTime, // 实际时间来自表单
         actualEndTime: endDateTime,   // 实际时间来自表单
         isLogged: 1,
-        sourceType: 'time_log', // 所有日志类型都为 time_log
+        sourceType: determinedSourceType, // 关键修正
       };
 
       // 设置计划开始/结束时间 (startTime, endTime)

@@ -1,9 +1,9 @@
 "use client"
 // 该组件负责展示和管理用户"今日时间轴"上的计划时间块和已记录的时间条目。
 // 它允许用户创建新的时间安排，编辑现有安排，并将计划转换为实际的时间日志。
-// 它集成了统一的时间块录入模态框，并处理与固定休息规则的交互。
+// 它集成了统一的时间块录入模态框，并处理与固定休息规则的交互，并显示今日已记录的总时长。
 
-import React, { useState, useEffect, useCallback, useRef, FC, ReactNode } from "react";
+import React, { useState, useEffect, useCallback, useRef, FC, ReactNode, useMemo } from "react";
 import {
   Activity,
   Calendar as CalendarIcon,
@@ -103,6 +103,34 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
 
   const todayDateStringForUI = getTodayDateString();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 新增：计算今日已记录的实际总时长（严格与时间日志页面一致）
+  const totalLoggedDurationMinutes = useMemo(() => {
+    const todayStr = getTodayDateString();
+    return timeBlocks.reduce((sum, block) => {
+      // 只统计今日、已记录的时间块
+      if (block.isLogged && block.date === todayStr) {
+        if (typeof block.durationMinutes === 'number') {
+          return sum + block.durationMinutes;
+        } else if (block.actualStartTime && block.actualEndTime) {
+          return sum + Math.round((block.actualEndTime.getTime() - block.actualStartTime.getTime()) / (1000 * 60));
+        }
+      }
+      return sum;
+    }, 0);
+  }, [timeBlocks]);
+
+  const formattedTotalLoggedDuration = useMemo(() => {
+    if (totalLoggedDurationMinutes === 0) return ""; // 如果总时长为0，则不显示
+
+    const hours = Math.floor(totalLoggedDurationMinutes / 60);
+    const minutes = totalLoggedDurationMinutes % 60;
+    let result = "";
+    if (hours > 0) result += `${hours}小时`;
+    if (minutes > 0) result += `${hours > 0 ? " " : ""}${minutes}分钟`;
+    
+    return result.trim();
+  }, [totalLoggedDurationMinutes]);
 
   // 拖拽状态
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -648,7 +676,14 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       )}
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-md font-medium">今日时间轴</CardTitle>
+          <div className="flex items-center"> {/* 用于组合标题和时长 */}
+            <CardTitle className="text-md font-medium">今日时间轴</CardTitle>
+            {formattedTotalLoggedDuration && (
+              <span className="ml-2 text-sm font-semibold text-primary">
+                ({formattedTotalLoggedDuration})
+              </span>
+            )}
+          </div>
           <Button className="bg-primary text-primary-foreground hover:bg-primary/90 ml-auto" size="sm" onClick={handleOpenAddModal} disabled={loading}>
             <Timer className="mr-1.5 h-4 w-4" /> 添加时间块
           </Button>

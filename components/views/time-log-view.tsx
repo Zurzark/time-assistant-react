@@ -214,9 +214,28 @@ export function TimeLogView() {
         }
       })
       .sort((a, b) => {
-        const aStartTime = a.actualStartTime ? (typeof a.actualStartTime === 'string' ? parseISO(a.actualStartTime) : a.actualStartTime).getTime() : 0;
-        const bStartTime = b.actualStartTime ? (typeof b.actualStartTime === 'string' ? parseISO(b.actualStartTime) : b.actualStartTime).getTime() : 0;
-        return aStartTime - bStartTime;
+        // 优先按实际开始时间/计划开始时间升序
+        const aStart = a.actualStartTime
+          ? (typeof a.actualStartTime === 'string' ? parseISO(a.actualStartTime) : a.actualStartTime)
+          : (a.startTime ? (typeof a.startTime === 'string' ? parseISO(a.startTime) : a.startTime) : undefined);
+        const bStart = b.actualStartTime
+          ? (typeof b.actualStartTime === 'string' ? parseISO(b.actualStartTime) : b.actualStartTime)
+          : (b.startTime ? (typeof b.startTime === 'string' ? parseISO(b.startTime) : b.startTime) : undefined);
+        if (aStart && bStart) {
+          const diff = aStart.getTime() - bStart.getTime();
+          if (diff !== 0) return diff;
+        }
+        // 若开始时间相同，按实际结束时间/计划结束时间升序
+        const aEnd = a.actualEndTime
+          ? (typeof a.actualEndTime === 'string' ? parseISO(a.actualEndTime) : a.actualEndTime)
+          : (a.endTime ? (typeof a.endTime === 'string' ? parseISO(a.endTime) : a.endTime) : undefined);
+        const bEnd = b.actualEndTime
+          ? (typeof b.actualEndTime === 'string' ? parseISO(b.actualEndTime) : b.actualEndTime)
+          : (b.endTime ? (typeof b.endTime === 'string' ? parseISO(b.endTime) : b.endTime) : undefined);
+        if (aEnd && bEnd) {
+          return aEnd.getTime() - bEnd.getTime();
+        }
+        return 0;
       })
   }, [loggedEntries, getCategoryDetails, getTaskDetails, getProjectDetails])
 
@@ -476,9 +495,13 @@ export function TimeLogView() {
                     <div key={entry.id} className="flex items-start border-b border-border/50 pb-4 last:border-b-0 last:pb-0">
                       <div className="w-28 text-sm pr-3 shrink-0">
                         <div className="font-semibold text-foreground">
-                          {entry.actualStartTime ? format(typeof entry.actualStartTime === 'string' ? parseISO(entry.actualStartTime) : entry.actualStartTime, "HH:mm") : "--:--"}
+                          {entry.actualStartTime
+                            ? format(typeof entry.actualStartTime === 'string' ? parseISO(entry.actualStartTime) : entry.actualStartTime, "HH:mm")
+                            : (entry.startTime ? format(typeof entry.startTime === 'string' ? parseISO(entry.startTime) : entry.startTime, "HH:mm") : "--:--")}
                           {" - "}
-                          {entry.actualEndTime ? format(typeof entry.actualEndTime === 'string' ? parseISO(entry.actualEndTime) : entry.actualEndTime, "HH:mm") : "--:--"}
+                          {entry.actualEndTime
+                            ? format(typeof entry.actualEndTime === 'string' ? parseISO(entry.actualEndTime) : entry.actualEndTime, "HH:mm")
+                            : (entry.endTime ? format(typeof entry.endTime === 'string' ? parseISO(entry.endTime) : entry.endTime, "HH:mm") : "--:--")}
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5">{entry.durationDisplay}</div>
                       </div>

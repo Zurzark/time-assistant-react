@@ -8,11 +8,14 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Play, Pause, SkipForward, RefreshCw, CheckCircle2, Volume2, VolumeX, Maximize2, Loader2, AlertCircle, Minus, X } from "lucide-react"
-import { type Task as DBTask, type Session as DBSession, ObjectStores, getAll, add as addToDB, update as updateDB } from "@/lib/db"
+import { type Task as DBTask, ObjectStores, getAll, add as addToDB, update as updateDB } from "@/lib/db"
 import { cn } from "@/lib/utils"
 import { usePomodoroSettings, getCurrentBackgroundSoundPath } from "@/lib/pomodoro-settings"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import React from "react"
+import { usePomodoroGlobal } from "./pomodoro-context"
+
+// 全局番茄钟弹窗组件，配合PomodoroContext实现全局唯一、状态持久化和页面切换不丢失，支持最小化、任务选择、音效、关闭确认等功能。
 
 // --- 从 pomodoro-card.tsx 借鉴或重新定义的 SVG Icon Components ---
 // Play Icon
@@ -47,8 +50,6 @@ const PomodoroCounterIcon = ({ filled, className }: { filled: boolean, className
 );
 
 interface PomodoroModalProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
   initialTask: { id: string | number; title: string } | null
 }
 
@@ -73,18 +74,33 @@ const DialogContentNoClose = React.forwardRef<
 ));
 DialogContentNoClose.displayName = "DialogContentNoClose";
 
-export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModalProps) {
+// 新增：关闭确认弹窗组件
+const ConfirmCloseDialog: React.FC<{ open: boolean; onConfirm: () => void; onCancel: () => void }> = ({ open, onConfirm, onCancel }) => (
+  <Dialog open={open} onOpenChange={open => { if (!open) onCancel(); }}>
+    <DialogContent className="max-w-xs">
+      <DialogHeader>
+        <DialogTitle>确认关闭</DialogTitle>
+        <DialogDescription>确定要关闭番茄钟吗？当前计时将会暂停。</DialogDescription>
+      </DialogHeader>
+      <div className="flex justify-end space-x-2 mt-4">
+        <Button variant="outline" onClick={onCancel}>取消</Button>
+        <Button variant="destructive" onClick={onConfirm}>确认关闭</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+)
+
+export function PomodoroModal({ initialTask }: PomodoroModalProps) {
+  // 全局状态
+  const {
+    open, setOpen, time, setTime, isActive, setIsActive, mode, setMode, pomodoroCount, setPomodoroCount, selectedTaskId, setSelectedTaskId, isMinimized, setIsMinimized
+  } = usePomodoroGlobal();
   const settings = usePomodoroSettings();
-  const [time, setTime] = useState(settings.workDuration * 60);
-  const [isActive, setIsActive] = useState(false);
-  const [mode, setMode] = useState<"work" | "shortBreak" | "longBreak">("work");
-  const [pomodoroCount, setPomodoroCount] = useState(0);
   const [completedAnimation, setCompletedAnimation] = useState(false); // For pomodoro counter animation
   
   const [dbTasks, setDbTasks] = useState<DBTask[]>([])
   const [loadingTasks, setLoadingTasks] = useState(true)
   const [loadTasksError, setLoadTasksError] = useState<string | null>(null)
-  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
 
   const [focusMode, setFocusMode] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
@@ -139,7 +155,11 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
         backgroundSoundRef.current.loop = true
       } else {
         if (backgroundSoundRef.current) {
-          backgroundSoundRef.current.pause()
+          try {
+            if (backgroundSoundRef.current && !backgroundSoundRef.current.paused) {
+              backgroundSoundRef.current.pause()
+            }
+          } catch (e) {}
           backgroundSoundRef.current = null
         }
       }
@@ -150,26 +170,45 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
       if (backgroundSoundRef.current) backgroundSoundRef.current.volume = newVolume
     }
     return () => {
-      startSoundRef.current?.pause()
-      endSoundRef.current?.pause()
-      backgroundSoundRef.current?.pause()
+      try { if (startSoundRef.current && !startSoundRef.current.paused) startSoundRef.current.pause() } catch (e) {}
+      try { if (endSoundRef.current && !endSoundRef.current.paused) endSoundRef.current.pause() } catch (e) {}
+      try { if (backgroundSoundRef.current && !backgroundSoundRef.current.paused) backgroundSoundRef.current.pause() } catch (e) {}
     }
   }, [open, settings.backgroundSound, settings.alarmVolume]) // 依赖 open 和设置
 
   // 背景音播放控制 (与 pomodoro-card.tsx 类似)
   useEffect(() => {
+    // 新增：只有在start.mp3播放完后才播放背景白噪声
+    let fadeInInterval: NodeJS.Timeout | null = null;
+    let startSoundEndedListener: (() => void) | null = null;
     if (open && isActive && mode === "work" && settings.backgroundSound !== 'none' && backgroundSoundRef.current && !isMuted) {
-      backgroundSoundRef.current.volume = 0
-      backgroundSoundRef.current.play().catch(e => console.error("Modal BG Sound Play Error:", e))
-      let currentVolume = 0
-      const fadeInInterval = setInterval(() => {
-        currentVolume += 0.1
-        if (currentVolume >= settings.alarmVolume / 100) {
-          currentVolume = settings.alarmVolume / 100
-          clearInterval(fadeInInterval)
-        }
-        if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume
-      }, 50)
+      if (startSoundRef.current) {
+        // 先播放start.mp3，等它播放完再播放背景音
+        try {
+          startSoundRef.current.currentTime = 0;
+          startSoundRef.current.play().catch(e => console.error("Start Sound Play Error:", e));
+        } catch (e) { console.warn(e) }
+        startSoundEndedListener = () => {
+          if (backgroundSoundRef.current) {
+            backgroundSoundRef.current.volume = 0;
+            try {
+              if (backgroundSoundRef.current.paused) {
+                backgroundSoundRef.current.play().catch(e => console.error("Modal BG Sound Play Error:", e));
+              }
+            } catch (e) { console.warn(e) }
+            let currentVolume = 0;
+            fadeInInterval = setInterval(() => {
+              currentVolume += 0.1;
+              if (currentVolume >= settings.alarmVolume / 100) {
+                currentVolume = settings.alarmVolume / 100;
+                if (fadeInInterval) clearInterval(fadeInInterval);
+              }
+              if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+            }, 50);
+          }
+        };
+        startSoundRef.current.addEventListener('ended', startSoundEndedListener, { once: true });
+      }
     } else if (backgroundSoundRef.current) {
       let currentVolume = backgroundSoundRef.current.volume
       if (currentVolume > 0) {
@@ -177,14 +216,24 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
           currentVolume -= 0.1
           if (currentVolume <= 0) {
             currentVolume = 0
-            if(backgroundSoundRef.current) backgroundSoundRef.current.pause()
+            try {
+              if(backgroundSoundRef.current && !backgroundSoundRef.current.paused) backgroundSoundRef.current.pause()
+            } catch (e) {}
             clearInterval(fadeOutInterval)
           }
           if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume
         }, 50)
       } else {
-         backgroundSoundRef.current.pause()
+        try {
+          if(backgroundSoundRef.current && !backgroundSoundRef.current.paused) backgroundSoundRef.current.pause()
+        } catch (e) {}
       }
+    }
+    return () => {
+      if (startSoundRef.current && startSoundEndedListener) {
+        startSoundRef.current.removeEventListener('ended', startSoundEndedListener);
+      }
+      if (fadeInInterval) clearInterval(fadeInInterval);
     }
   }, [open, isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted])
 
@@ -245,7 +294,11 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
     const soundRef = soundType === 'start' ? startSoundRef : endSoundRef;
     if (soundRef.current) {
       soundRef.current.currentTime = 0;
-      soundRef.current.play().catch(e => console.error(`Modal ${soundType} Sound Play Error:`, e));
+      try {
+        if (soundRef.current.paused) {
+          soundRef.current.play().catch(e => console.error(`Modal ${soundType} Sound Play Error:`, e));
+        }
+      } catch (e) { console.warn(e) }
     }
   }, [isMuted, settings.enableStartEndSounds]);
   
@@ -362,16 +415,14 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
     if (!open) return;
     if (isActive && time > 0) {
       intervalRef.current = setInterval(() => {
-        setTime(prev => {
-          if (prev <= 1) {
-            setIsActive(false);
-            setTime(0);
-            setTimeout(() => handleTimerCompleteLogic(), 0);
-            return 0;
-          }
-          if (prev === 4) playSoundLogic('end');
-          return prev - 1;
-        });
+        if (time <= 1) {
+          setIsActive(false);
+          setTime(0);
+          setTimeout(() => handleTimerCompleteLogic(), 0);
+        } else {
+          if (time === 4) playSoundLogic('end');
+          setTime(time - 1);
+        }
       }, 1000);
     } else {
       if (intervalRef.current) {
@@ -404,7 +455,9 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
           currentVolume -= 0.1;
           if (currentVolume <= 0) {
             currentVolume = 0;
-            if(backgroundSoundRef.current) backgroundSoundRef.current.pause();
+            try {
+              if(backgroundSoundRef.current && !backgroundSoundRef.current.paused) backgroundSoundRef.current.pause();
+            } catch (e) {}
             clearInterval(fadeOutInterval);
           }
           if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
@@ -416,8 +469,10 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
     setIsActive(false)
     setTime(durations[mode])
     if (backgroundSoundRef.current) {
-      backgroundSoundRef.current.pause()
-      backgroundSoundRef.current.currentTime = 0
+      try {
+        if (backgroundSoundRef.current && !backgroundSoundRef.current.paused) backgroundSoundRef.current.pause()
+      } catch (e) {}
+      if (backgroundSoundRef.current) backgroundSoundRef.current.currentTime = 0
     }
   }
 
@@ -472,25 +527,31 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
     };
   }, [open, isActive, mode, time]);
 
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
 
   return (
     <>
+      {/* 关闭确认弹窗 */}
+      <ConfirmCloseDialog
+        open={showCloseConfirm}
+        onConfirm={() => {
+          setShowCloseConfirm(false)
+          setOpen(false)
+          setIsMinimized(false)
+        }}
+        onCancel={() => setShowCloseConfirm(false)}
+      />
       {/* 最小化时只显示悬浮窗 */}
       {isMinimized && (
-        <MiniPomodoroWidget
-          time={time}
-          mode={mode}
-          isActive={isActive}
-          currentTask={dbTasks.find(t => t.id === selectedTaskId)?.title || "未选择任务"}
-          onRestore={() => setIsMinimized(false)}
-          onPause={() => setIsActive(false)}
-          onResume={() => setIsActive(true)}
-        />
+        <MiniPomodoroWidget />
       )}
       {/* 只有未最小化时才显示 Dialog */}
       <Dialog open={open && !isMinimized} onOpenChange={(isOpen) => {
-        onOpenChange(isOpen)
+        if (!isOpen) {
+          setShowCloseConfirm(true)
+        } else {
+          setOpen(isOpen)
+        }
         if (!isOpen && isActive) {
           setIsActive(false) // Stop timer if modal is closed
         }
@@ -508,11 +569,9 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
             <Button variant="ghost" size="icon" onClick={() => setIsMinimized(true)} title="最小化">
               <Minus className="h-5 w-5" />
             </Button>
-            <DialogClose asChild>
-              <Button variant="ghost" size="icon" title="关闭">
-                <X className="h-5 w-5" />
-              </Button>
-            </DialogClose>
+            <Button variant="ghost" size="icon" title="关闭" onClick={() => setShowCloseConfirm(true)}>
+              <X className="h-5 w-5" />
+            </Button>
           </div>
           <DialogHeader>
             <DialogTitle className="text-center text-2xl font-semibold">专注计时</DialogTitle>
@@ -676,16 +735,23 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
 }
 
 // 右下角悬浮窗组件
-interface MiniPomodoroWidgetProps {
-  time: number;
-  mode: "work" | "shortBreak" | "longBreak";
-  isActive: boolean;
-  currentTask: string;
-  onRestore: () => void;
-  onPause: () => void;
-  onResume: () => void;
-}
-const MiniPomodoroWidget: React.FC<MiniPomodoroWidgetProps> = ({ time, mode, isActive, currentTask, onRestore, onPause, onResume }) => {
+const MiniPomodoroWidget: React.FC = () => {
+  const { time, mode, isActive, setIsActive, isMinimized, setIsMinimized, selectedTaskId } = usePomodoroGlobal();
+  // 任务名
+  const [dbTasks, setDbTasks] = React.useState<DBTask[]>([]);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const allDbTasks = await getAll<DBTask>(ObjectStores.TASKS);
+        setDbTasks(allDbTasks.filter(t => !t.isDeleted));
+      } catch {}
+    })();
+  }, []);
+  const currentTask = dbTasks.find(t => t.id === selectedTaskId)?.title || "未选择任务";
+  const onRestore = () => setIsMinimized(false);
+  const onPause = () => setIsActive(false);
+  const onResume = () => setIsActive(true);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60

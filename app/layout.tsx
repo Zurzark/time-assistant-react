@@ -1,3 +1,4 @@
+// Next.js全局布局文件，已集成PomodoroProvider，实现全局唯一番茄钟弹窗和状态管理。
 // 该文件是 Next.js 应用的根布局组件，负责定义所有页面的基本 HTML 结构和全局提供者。
 import type React from "react"
 import type { Metadata } from "next"
@@ -7,6 +8,8 @@ import { ThemeProvider } from "@/components/common/theme-provider"
 import DatabaseInitializer from "@/components/common/database-initializer"
 import { Toaster } from "@/components/ui/sonner"
 import { StagewiseToolbar } from '@stagewise/toolbar-next';
+import { PomodoroProvider } from "@/components/pomodoro/pomodoro-context"
+import PomodoroModal from "@/components/pomodoro/pomodoro-modal"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -32,7 +35,10 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <DatabaseInitializer />
           <Toaster />
-          {children}
+          <PomodoroProvider>
+            <PomodoroModal initialTask={null} />
+            {children}
+          </PomodoroProvider>
         </ThemeProvider>
       </body>
     </html>
