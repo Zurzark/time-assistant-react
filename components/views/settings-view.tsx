@@ -66,6 +66,8 @@ import { ActivityCategorySettings } from "./settings/activity-category-settings"
 import { DataManagementSettings } from "./settings/data-management-settings";
 import { TagManagementSettings } from "./settings/tag-management-settings";
 
+// 新增：引入番茄钟设置面板
+import { PomodoroSettingsPanel } from "../settings/pomodoro-settings-panel";
 
 // 定义标签颜色的类型
 type TagColors = Record<string, string>;
@@ -750,144 +752,7 @@ export function SettingsView() {
 
               {/* Pomodoro Settings */}
               {activeTab === "pomodoro" && (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">时间设置</h3>
-
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="work-duration">工作时长（分钟）: {workDuration}</Label>
-                          <span className="text-sm text-muted-foreground">{workDuration} 分钟</span>
-                        </div>
-                        <Slider
-                          id="work-duration"
-                          min={5}
-                          max={60}
-                          step={5}
-                          value={[workDuration]}
-                          onValueChange={(value) => setWorkDuration(value[0])}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="short-break">短休息时长（分钟）</Label>
-                          <span className="text-sm text-muted-foreground">{shortBreakDuration} 分钟</span>
-                        </div>
-                        <Slider
-                          id="short-break"
-                          min={1}
-                          max={15}
-                          step={1}
-                          value={[shortBreakDuration]}
-                          onValueChange={(value) => setShortBreakDuration(value[0])}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="long-break">长休息时长（分钟）</Label>
-                          <span className="text-sm text-muted-foreground">{longBreakDuration} 分钟</span>
-                        </div>
-                        <Slider
-                          id="long-break"
-                          min={5}
-                          max={30}
-                          step={5}
-                          value={[longBreakDuration]}
-                          onValueChange={(value) => setLongBreakDuration(value[0])}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="pomodoro-count">番茄钟循环次数</Label>
-                          <span className="text-sm text-muted-foreground">{pomodoroCount} 次</span>
-                        </div>
-                        <Slider
-                          id="pomodoro-count"
-                          min={1}
-                          max={10}
-                          step={1}
-                          value={[pomodoroCount]}
-                          onValueChange={(value) => setPomodoroCount(value[0])}
-                        />
-                        <p className="text-xs text-muted-foreground">完成这么多次番茄钟后会有一次长休息</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">提示音设置</h3>
-
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <Label htmlFor="sound-enabled">启用提示音</Label>
-                      </div>
-                      <Switch id="sound-enabled" checked={soundEnabled} onCheckedChange={setSoundEnabled} />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="sound-type">提示音类型</Label>
-                      <Select defaultValue="bell" disabled={!soundEnabled}>
-                        <SelectTrigger id="sound-type">
-                          <SelectValue placeholder="选择提示音" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="bell">铃声</SelectItem>
-                          <SelectItem value="digital">数字音</SelectItem>
-                          <SelectItem value="nature">自然音</SelectItem>
-                          <SelectItem value="custom">自定义</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="sound-volume">音量</Label>
-                      <Slider
-                        id="sound-volume"
-                        min={0}
-                        max={100}
-                        step={10}
-                        defaultValue={[80]}
-                        disabled={!soundEnabled}
-                      />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">自动化设置</h3>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox id="auto-start-breaks" defaultChecked />
-                        <Label htmlFor="auto-start-breaks">自动开始休息</Label>
-                      </div>
-                      <p className="text-xs text-muted-foreground pl-6">工作时段结束后自动开始休息计时</p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox id="auto-start-work" />
-                        <Label htmlFor="auto-start-work">自动开始工作</Label>
-                      </div>
-                      <p className="text-xs text-muted-foreground pl-6">休息结束后自动开始下一个工作时段</p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox id="auto-complete-task" />
-                        <Label htmlFor="auto-complete-task">自动完成任务</Label>
-                      </div>
-                      <p className="text-xs text-muted-foreground pl-6">完成所有番茄钟后询问是否标记任务为已完成</p>
-                    </div>
-                  </div>
-                </div>
+                <PomodoroSettingsPanel />
               )}
 
               {/* Notification Settings */}

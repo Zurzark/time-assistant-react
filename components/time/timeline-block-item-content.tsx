@@ -313,66 +313,64 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
             </div>
 
             {/* Action Menu - only if not a pomodoro log */} 
-            {block.sourceType !== 'pomodoro_log' && (
-                <div className="flex items-center space-x-0.5 shrink-0 ml-1">
+            {(
+              // 只隐藏固定休息的下拉菜单，其余类型都显示
+              block.sourceType !== 'fixed_break'
+            ) && (
+              <div className="flex items-center space-x-0.5 shrink-0 ml-1">
                 {block.taskId && !block.isLogged && (
-                    <Button
-                    variant="ghost"                    size="icon"
+                  <Button
+                    variant="ghost" size="icon"
                     className="h-6 w-6 hover:bg-blue-100 dark:hover:bg-blue-800/50 rounded-full"
                     title="启动专注"
                     onClick={(e) => {
-                        e.stopPropagation();
-                        block.taskId &&
-                        onPomodoroClick(String(block.taskId), blockTitle);
+                      e.stopPropagation();
+                      block.taskId &&
+                      onPomodoroClick(String(block.taskId), blockTitle);
                     }}
-                    >
+                  >
                     <Play className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" />
-                    </Button>
+                  </Button>
                 )}
                 <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
+                  <DropdownMenuTrigger asChild>
                     <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full"
-                        onClick={(e) => e.stopPropagation()}
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                        <MoreHorizontal className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                      <MoreHorizontal className="h-4 w-4 text-gray-500 dark:text-gray-400" />
                     </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenuItem onClick={() => handleOpenEditModal(block)} className="text-sm">
-                        <Edit3 className="mr-2 h-3.5 w-3.5" />
-                        {block.isLogged ? "编辑日志" : "编辑计划"}
+                      <Edit3 className="mr-2 h-3.5 w-3.5" />
+                      {block.isLogged ? "编辑日志" : "编辑计划"}
                     </DropdownMenuItem>
-
                     {!block.isLogged && (
-                        <DropdownMenuItem
+                      <DropdownMenuItem
                         onClick={() => handleOpenLogModalFromPlan(block)}
-                        // Enable if current or past, highlight if past and actionable
-                        disabled={new Date(block.endTime) > currentTime && !isCurrentBlock } 
+                        disabled={new Date(block.endTime) > currentTime && !isCurrentBlock}
                         className={cn(
-                            "text-sm",
-                            (isPast || isCurrentBlock) && "text-green-600 focus:text-green-700 dark:text-green-400 dark:focus:text-green-300"
+                          "text-sm",
+                          (isPast || isCurrentBlock) && "text-green-600 focus:text-green-700 dark:text-green-400 dark:focus:text-green-300"
                         )}
-                        >
+                      >
                         <CheckCircle2 className="mr-2 h-3.5 w-3.5" /> 记录实际时间
-                        </DropdownMenuItem>
+                      </DropdownMenuItem>
                     )}
-                    
-                    {/* Allow deleting non-logged items, or logged items that are not fixed breaks (fixed breaks are managed by rules) */} 
-                    {(!block.isLogged || (block.isLogged && block.sourceType !== 'fixed_break')) && (
-                        <DropdownMenuItem
-                            className="text-sm text-red-600 hover:!text-red-600 focus:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/50 focus:!bg-red-50 dark:focus:!bg-red-900/50 dark:text-red-400 dark:focus:text-red-300"
-                            onClick={() => setDeleteConfirmOpen(true)}
-                        >
-                            <Trash2 className="mr-2 h-3.5 w-3.5" />
-                            {block.isLogged ? "删除日志" : "删除计划"}
-                        </DropdownMenuItem>
-                    )}
-                    </DropdownMenuContent>
+                    {/* 允许删除所有非固定休息的时间块 */}
+                    <DropdownMenuItem
+                      className="text-sm text-red-600 hover:!text-red-600 focus:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/50 focus:!bg-red-50 dark:focus:!bg-red-900/50 dark:text-red-400 dark:focus:text-red-300"
+                      onClick={() => setDeleteConfirmOpen(true)}
+                    >
+                      <Trash2 className="mr-2 h-3.5 w-3.5" />
+                      {block.isLogged ? "删除日志" : "删除计划"}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
                 </DropdownMenu>
-                </div>
+              </div>
             )}
           </div>
         </div>

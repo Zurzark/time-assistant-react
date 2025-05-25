@@ -10,6 +10,7 @@ import { Slider } from "@/components/ui/slider"
 import { Play, Pause, SkipForward, RefreshCw, CheckCircle2, Volume2, VolumeX, Maximize2, Loader2, AlertCircle } from "lucide-react"
 import { type Task as DBTask, type Session as DBSession, ObjectStores, getAll, add as addToDB, update as updateDB } from "@/lib/db"
 import { cn } from "@/lib/utils"
+import { usePomodoroSettings, getCurrentBackgroundSoundPath } from "@/lib/pomodoro-settings"
 
 // --- 从 pomodoro-card.tsx 借鉴或重新定义的 SVG Icon Components ---
 // Play Icon
@@ -50,11 +51,12 @@ interface PomodoroModalProps {
 }
 
 export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModalProps) {
-  const [time, setTime] = useState(25 * 60) // 25 minutes in seconds
-  const [isActive, setIsActive] = useState(false)
-  const [mode, setMode] = useState<"work" | "shortBreak" | "longBreak">("work")
-  const [pomodoroCount, setPomodoroCount] = useState(0)
-  const [completedAnimation, setCompletedAnimation] = useState(false) // For pomodoro counter animation
+  const settings = usePomodoroSettings();
+  const [time, setTime] = useState(settings.workDuration * 60);
+  const [isActive, setIsActive] = useState(false);
+  const [mode, setMode] = useState<"work" | "shortBreak" | "longBreak">("work");
+  const [pomodoroCount, setPomodoroCount] = useState(0);
+  const [completedAnimation, setCompletedAnimation] = useState(false); // For pomodoro counter animation
   
   const [dbTasks, setDbTasks] = useState<DBTask[]>([])
   const [loadingTasks, setLoadingTasks] = useState(true)
@@ -62,9 +64,15 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
 
   const [focusMode, setFocusMode] = useState(false)
-  const [soundEnabled, setSoundEnabled] = useState(true)
-  const [volume, setVolume] = useState(50)
+  const [isMuted, setIsMuted] = useState(false)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isCompletingRef = useRef(false)
+  const stateTransitionRef = useRef(false) // 新增：状态转换标记
+
+  // 新增：音效相关的 refs
+  const startSoundRef = useRef<HTMLAudioElement | null>(null)
+  const endSoundRef = useRef<HTMLAudioElement | null>(null)
+  const backgroundSoundRef = useRef<HTMLAudioElement | null>(null)
 
   // Thematic colors (从 pomodoro-card.tsx)
   const themeColors = {
@@ -91,10 +99,71 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
 
   // Duration settings
   const durations = {
-    work: 25 * 60,
-    shortBreak: 5 * 60,
-    longBreak: 15 * 60,
+    work: settings.workDuration * 60,
+    shortBreak: settings.shortBreakDuration * 60,
+    longBreak: settings.longBreakDuration * 60,
   }
+
+  // 初始化音效
+  useEffect(() => {
+    if (typeof window !== "undefined" && open) { // 只在弹窗打开时初始化
+      startSoundRef.current = new Audio("/audio/start.mp3")
+      endSoundRef.current = new Audio("/audio/end.mp3")
+      
+      const bgSoundPath = getCurrentBackgroundSoundPath(settings)
+      if (bgSoundPath) {
+        backgroundSoundRef.current = new Audio(bgSoundPath)
+        backgroundSoundRef.current.loop = true
+      } else {
+        if (backgroundSoundRef.current) {
+          backgroundSoundRef.current.pause()
+          backgroundSoundRef.current = null
+        }
+      }
+      // 根据 settings 更新音量
+      const newVolume = settings.alarmVolume / 100
+      if (startSoundRef.current) startSoundRef.current.volume = newVolume
+      if (endSoundRef.current) endSoundRef.current.volume = newVolume
+      if (backgroundSoundRef.current) backgroundSoundRef.current.volume = newVolume
+    }
+    return () => {
+      startSoundRef.current?.pause()
+      endSoundRef.current?.pause()
+      backgroundSoundRef.current?.pause()
+    }
+  }, [open, settings.backgroundSound, settings.alarmVolume]) // 依赖 open 和设置
+
+  // 背景音播放控制 (与 pomodoro-card.tsx 类似)
+  useEffect(() => {
+    if (open && isActive && mode === "work" && settings.backgroundSound !== 'none' && backgroundSoundRef.current && !isMuted) {
+      backgroundSoundRef.current.volume = 0
+      backgroundSoundRef.current.play().catch(e => console.error("Modal BG Sound Play Error:", e))
+      let currentVolume = 0
+      const fadeInInterval = setInterval(() => {
+        currentVolume += 0.1
+        if (currentVolume >= settings.alarmVolume / 100) {
+          currentVolume = settings.alarmVolume / 100
+          clearInterval(fadeInInterval)
+        }
+        if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume
+      }, 50)
+    } else if (backgroundSoundRef.current) {
+      let currentVolume = backgroundSoundRef.current.volume
+      if (currentVolume > 0) {
+        const fadeOutInterval = setInterval(() => {
+          currentVolume -= 0.1
+          if (currentVolume <= 0) {
+            currentVolume = 0
+            if(backgroundSoundRef.current) backgroundSoundRef.current.pause()
+            clearInterval(fadeOutInterval)
+          }
+          if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume
+        }, 50)
+      } else {
+         backgroundSoundRef.current.pause()
+      }
+    }
+  }, [open, isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted])
 
   const loadTasksForModal = useCallback(async () => {
     setLoadingTasks(true)
@@ -122,127 +191,225 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
     }
   }, [initialTask, selectedTaskId])
 
+  // 重设计时器逻辑 - 当弹窗打开或设置变化时
   useEffect(() => {
     if (open) {
-      loadTasksForModal()
-      // Reset pomodoro specific states when modal is (re)opened
-      // This assumes a fresh pomodoro session for the selected task when modal opens
-      setTime(durations.work)
-      setMode("work")
-      setIsActive(false)
-      setPomodoroCount(0)
+      // 完全重置计时器状态
+      setIsActive(false);
+      setMode("work");
+      setTime(settings.workDuration * 60);
+      setPomodoroCount(0);
+      isCompletingRef.current = false;
+      stateTransitionRef.current = false;
+      
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      
+      if (backgroundSoundRef.current) {
+        backgroundSoundRef.current.pause();
+        backgroundSoundRef.current.currentTime = 0;
+      }
+      
+      // 加载任务
+      loadTasksForModal();
     }
-  }, [open, loadTasksForModal]) // loadTasksForModal has initialTask as dependency
+  }, [open, settings.workDuration, settings.shortBreakDuration, settings.longBreakDuration, settings.longBreakInterval, loadTasksForModal]);
   
-  // Handle timer logic
+  const playSoundLogic = useCallback((soundType: 'start' | 'end') => {
+    if (isMuted || !settings.enableStartEndSounds) return;
+    const soundRef = soundType === 'start' ? startSoundRef : endSoundRef;
+    if (soundRef.current) {
+      soundRef.current.currentTime = 0;
+      soundRef.current.play().catch(e => console.error(`Modal ${soundType} Sound Play Error:`, e));
+    }
+  }, [isMuted, settings.enableStartEndSounds]);
+  
+  // 死锁终极修复：mode或time变化时强制解锁
   useEffect(() => {
-    if (isActive && open) { // Only run timer if modal is open and active
-      intervalRef.current = setInterval(() => {
-        setTime((prevTime) => {
-          if (prevTime <= 1) {
-            handleTimerCompleteLogic()
-            return 0
-          }
-          return prevTime - 1
-        })
-      }, 1000)
-    } else if (intervalRef.current) {
-      clearInterval(intervalRef.current)
+    if (stateTransitionRef.current) {
+      console.log('[解锁] mode或time变化，强制解锁stateTransitionRef');
+      stateTransitionRef.current = false;
     }
+  }, [mode, time]);
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
+  const handleTimerCompleteLogic = useCallback(async () => {
+    if (isCompletingRef.current || stateTransitionRef.current) {
+      console.warn("handleTimerCompleteLogic re-entry prevented in PomodoroModal");
+      return;
     }
-  }, [isActive, open, time]) // Added time to dependencies
-
-  const handleTimerCompleteLogic = async () => {
-    if (intervalRef.current) clearInterval(intervalRef.current!)
-    setIsActive(false)
-
-    if (soundEnabled) {
-      console.log("Playing completion sound (simulated for modal)")
-      // 실제 프로덕션에서는 여기에 오디오 재생 로직 추가
+    isCompletingRef.current = true;
+    stateTransitionRef.current = true;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
-
-    if (mode === "work") {
-      const newCount = pomodoroCount + 1
-      setPomodoroCount(newCount)
-      setCompletedAnimation(true)
-      setTimeout(() => setCompletedAnimation(false), 1000)
-
-      // Log session and update task stats
-      if (selectedTaskId) {
-        const task = dbTasks.find(t => t.id === selectedTaskId)
-        if (task) {
-          // 1. Log Pomodoro Session to DBSession
-          const sessionData: Omit<DBSession, 'id'> = {
-            taskId: selectedTaskId,
-            startTime: new Date(Date.now() - durations.work * 1000), // Approximate start time
-            endTime: new Date(),
-            duration: durations.work * 1000, // Duration in ms
-            // notes: "Completed a Pomodoro" // Optional
+    try {
+      setIsActive(false);
+      if (mode === "work") {
+        const newCount = pomodoroCount + 1;
+        setPomodoroCount(newCount);
+        setCompletedAnimation(true);
+        setTimeout(() => setCompletedAnimation(false), 1000);
+        try {
+          const endTime = new Date();
+          const startTime = new Date(endTime.getTime() - settings.workDuration * 60 * 1000);
+          const dateStr = endTime.toISOString().slice(0, 10);
+          const taskTitle = selectedTaskId && dbTasks.find(t => t.id === selectedTaskId)?.title || "番茄钟专注";
+          const timeBlock = {
+            title: taskTitle,
+            sourceType: "pomodoro_log",
+            startTime,
+            endTime,
+            durationMinutes: settings.workDuration,
+            isLogged: 1,
+            date: dateStr,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            taskId: selectedTaskId || undefined,
+          };
+          await addToDB(ObjectStores.TIME_BLOCKS, timeBlock);
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("timelineShouldUpdate"));
           }
-          try {
-            await addToDB(ObjectStores.SESSIONS, sessionData)
-            console.log("Pomodoro session logged for task:", selectedTaskId)
-          } catch (error) {
-            console.error("Failed to log pomodoro session in modal:", error)
-          }
-
-          // 2. Update actualPomodoros on the task (if field exists and is used)
-          if (task.actualPomodoros !== undefined) {
-            const updatedTask = {
-              ...task,
-              actualPomodoros: (task.actualPomodoros || 0) + 1,
-              updatedAt: new Date(),
-            }
-            try {
-              await updateDB(ObjectStores.TASKS, updatedTask)
-              // Optimistically update local dbTasks if needed, or rely on next full load
-              setDbTasks(prev => prev.map(t => t.id === selectedTaskId ? updatedTask : t))
-            } catch (error) {
-              console.error("Failed to update task actual pomodoros in modal:", error)
+          if (selectedTaskId) {
+            const task = dbTasks.find(t => t.id === selectedTaskId);
+            if (task) {
+              const sessionData = {
+                taskId: selectedTaskId,
+                startTime: new Date(Date.now() - durations.work * 1000),
+                endTime: new Date(),
+                duration: durations.work * 1000,
+              };
+              await addToDB(ObjectStores.SESSIONS, sessionData);
+              if (task.actualPomodoros !== undefined) {
+                const updatedTask = {
+                  ...task,
+                  actualPomodoros: (task.actualPomodoros || 0) + 1,
+                  updatedAt: new Date(),
+                };
+                await updateDB(ObjectStores.TASKS, updatedTask);
+                setDbTasks(prev => prev.map(t => t.id === selectedTaskId ? updatedTask : t));
+              }
             }
           }
+        } catch (e) {
+          console.error("添加番茄钟记录失败", e);
         }
-      }
-
-      if (newCount % 4 === 0) {
-        setMode("longBreak")
-        setTime(durations.longBreak)
+        if (newCount % settings.longBreakInterval === 0) {
+          setMode("longBreak");
+        } else {
+          setMode("shortBreak");
+        }
       } else {
-        setMode("shortBreak")
-        setTime(durations.shortBreak)
+        setMode("work");
       }
-    } else { // Break ended
-      setMode("work")
-      setTime(durations.work)
+    } finally {
+      isCompletingRef.current = false;
+      stateTransitionRef.current = false;
     }
-  }
+  }, [mode, pomodoroCount, settings, dbTasks, selectedTaskId, durations.work, settings.longBreakInterval]);
+
+  // mode变化时自动重置time，并根据设置自动激活isActive
+  useEffect(() => {
+    if (!open) return;
+    let nextTime = 0;
+    if (mode === "work") {
+      nextTime = settings.workDuration * 60;
+    } else if (mode === "shortBreak") {
+      nextTime = settings.shortBreakDuration * 60;
+    } else if (mode === "longBreak") {
+      nextTime = settings.longBreakDuration * 60;
+    }
+    setTime(nextTime);
+    // 自动激活逻辑
+    if (mode === "work" && settings.autoStartPomodoros) {
+      setIsActive(true);
+    } else if ((mode === "shortBreak" || mode === "longBreak") && settings.autoStartBreaks) {
+      setIsActive(true);
+    } else {
+      setIsActive(false);
+    }
+    // eslint-disable-next-line
+  }, [mode, open, settings.workDuration, settings.shortBreakDuration, settings.longBreakDuration, settings.autoStartBreaks, settings.autoStartPomodoros]);
+
+  // 主计时器逻辑，依赖顺序和数量保持稳定
+  useEffect(() => {
+    if (!open) return;
+    if (isActive && time > 0) {
+      intervalRef.current = setInterval(() => {
+        setTime(prev => {
+          if (prev <= 1) {
+            setIsActive(false);
+            setTime(0);
+            setTimeout(() => handleTimerCompleteLogic(), 0);
+            return 0;
+          }
+          if (prev === 4) playSoundLogic('end');
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  // 依赖顺序和数量必须稳定
+  }, [isActive, open, time, mode, playSoundLogic, handleTimerCompleteLogic]);
+
+  // 统一按钮可用性判断
+  const isActionDisabled = loadingTasks || stateTransitionRef.current;
 
   const toggleTimer = () => {
-    if (!selectedTaskId && dbTasks.length > 0 && !loadingTasks) {
-      alert("请先选择一个任务。")
-      return
+    const newIsActive = !isActive
+    setIsActive(newIsActive)
+    
+    if (newIsActive && mode === 'work') {
+      playSoundLogic('start')
+    } else if (!newIsActive && mode === 'work' && backgroundSoundRef.current && backgroundSoundRef.current.volume > 0) {
+        // If pausing during work with background sound, fade it out
+        let currentVolume = backgroundSoundRef.current.volume;
+        const fadeOutInterval = setInterval(() => {
+          currentVolume -= 0.1;
+          if (currentVolume <= 0) {
+            currentVolume = 0;
+            if(backgroundSoundRef.current) backgroundSoundRef.current.pause();
+            clearInterval(fadeOutInterval);
+          }
+          if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+        }, 50);
     }
-    if (!selectedTaskId && dbTasks.length === 0 && !loadingTasks) {
-      alert("没有可用的任务开始番茄钟。请先创建或选择一个任务。")
-      return
-    }
-    setIsActive(!isActive)
   }
 
   const resetTimerLogic = () => {
     setIsActive(false)
     setTime(durations[mode])
+    if (backgroundSoundRef.current) {
+      backgroundSoundRef.current.pause()
+      backgroundSoundRef.current.currentTime = 0
+    }
   }
 
   const skipTimerLogic = () => {
+    playSoundLogic('end')
     handleTimerCompleteLogic()
   }
 
   const completePomodoroAction = () => {
-    handleTimerCompleteLogic()
+    if (mode === 'work') {
+      playSoundLogic('end')
+      handleTimerCompleteLogic()
+    } else {
+      console.warn("Modal Complete action called in non-work mode")
+    }
   }
 
   const formatTime = (seconds: number) => {
@@ -266,6 +433,21 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
   const strokeDashoffset = circumference - (timerProgress / 100) * circumference;
 
   const selectedTaskDetails = dbTasks.find(task => task.id === selectedTaskId)
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let originTitle = document.title;
+    if (open && isActive) {
+      let icon = mode === 'work' ? '🧑‍💻' : '🛎️';
+      let label = mode === 'work' ? 'Focus' : 'Break';
+      document.title = `${formatTime(time)} ${icon} · ${label}`;
+    } else {
+      document.title = originTitle;
+    }
+    return () => {
+      document.title = originTitle;
+    };
+  }, [open, isActive, mode, time]);
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
@@ -361,7 +543,7 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
               size="icon"
               className={cn("h-11 w-11 text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700", focusMode ? "h-14 w-14" : "")}
               onClick={resetTimerLogic}
-              disabled={isActive || loadingTasks}
+              disabled={isActionDisabled}
               title="重置"
             >
               <RefreshCw className={focusMode ? "h-7 w-7" : "h-5 w-5"} />
@@ -370,13 +552,14 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
               variant="default"
               size="lg" 
               onClick={toggleTimer}
-              disabled={loadingTasks && (!selectedTaskId || selectedTaskId === null)}
+              disabled={isActionDisabled}
               className={cn(
                 "min-w-[100px] text-white transition-all duration-300 transform active:scale-95 rounded-full",
                 focusMode ? "h-20 w-20 text-lg px-4 py-2" : "h-16 w-16", 
                 isActive
                     ? (mode === "work" ? "bg-amber-500 hover:bg-amber-600 focus-visible:ring-amber-500" : "bg-teal-500 hover:bg-teal-600 focus-visible:ring-teal-500") 
-                    : currentTheme.button 
+                    : currentTheme.button,
+                stateTransitionRef.current ? "opacity-50 cursor-not-allowed" : ""
               )}
             >
               {isActive ? <PauseIcon className={focusMode ? "h-8 w-8" : "h-6 w-6"} /> : <PlayIcon className={focusMode ? "h-8 w-8" : "h-6 w-6"} />}
@@ -386,7 +569,7 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
               size="icon"
               className={cn("h-11 w-11 text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-700", focusMode ? "h-14 w-14" : "")}
               onClick={skipTimerLogic}
-              disabled={!isActive && !time} 
+              disabled={isActionDisabled} 
               title="跳过当前"
             >
               <SkipForward className={focusMode ? "h-7 w-7" : "h-5 w-5"} />
@@ -398,7 +581,7 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
                 variant="outline"
                 size="sm"
                 onClick={completePomodoroAction}
-                disabled={loadingTasks || (!isActive && time === durations.work ) } 
+                disabled={isActionDisabled} 
                 className={cn(
                     "min-w-[100px] transition-all duration-300 transform active:scale-95 mt-3",
                     currentTheme.buttonOutline,
@@ -421,26 +604,11 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  {soundEnabled ? <Volume2 className="h-5 w-5 text-slate-600 dark:text-slate-400" /> : <VolumeX className="h-5 w-5 text-slate-600 dark:text-slate-400" />}
-                  <Label htmlFor="sound-enabled" className="text-slate-700 dark:text-slate-300">声音提示</Label>
+                  {isMuted ? <VolumeX className="h-5 w-5 text-slate-600 dark:text-slate-400" /> : <Volume2 className="h-5 w-5 text-slate-600 dark:text-slate-400" />}
+                  <Label htmlFor="modal-mute-sound" className="text-slate-700 dark:text-slate-300">静音</Label>
                 </div>
-                <Switch id="sound-enabled" checked={soundEnabled} onCheckedChange={setSoundEnabled} />
+                <Switch id="modal-mute-sound" checked={isMuted} onCheckedChange={setIsMuted} />
               </div>
-              {soundEnabled && (
-                <div className="space-y-1">
-                   <div className="flex items-center justify-between">
-                    <Label htmlFor="volume" className="text-sm text-slate-600 dark:text-slate-400">音量</Label>
-                    <span className="text-sm text-slate-500 dark:text-slate-400">{volume}%</span>
-                  </div>
-                  <Slider
-                    id="volume"
-                    min={0} max={100} step={1}
-                    value={[volume]}
-                    onValueChange={(value) => setVolume(value[0])}
-                    className="w-full"
-                  />
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -450,3 +618,4 @@ export function PomodoroModal({ open, onOpenChange, initialTask }: PomodoroModal
 }
 
 export default PomodoroModal
+

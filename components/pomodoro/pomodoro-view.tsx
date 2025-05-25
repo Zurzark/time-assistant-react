@@ -21,17 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { type Task as DBTask, type Session as DBSession, ObjectStores, getAll, add as addToDB, update as updateDB, get as getFromDB } from "@/lib/db"
-
-interface PomodoroSettings {
-  workDuration: number
-  shortBreakDuration: number
-  longBreakDuration: number
-  longBreakInterval: number
-  autoStartBreaks: boolean
-  autoStartPomodoros: boolean
-  alarmSound: string
-  alarmVolume: number
-}
+import { usePomodoroSettings, type PomodoroSettings as GlobalPomodoroSettings, getCurrentBackgroundSoundPath, backgroundSoundOptions as globalBackgroundSoundOptions } from "@/lib/pomodoro-settings"
 
 interface UIPomodoroSession extends DBSession {
     id: number;
@@ -60,32 +50,7 @@ const PomodoroCounterIcon = ({ filled, className }: { filled: boolean, className
   );
 
 export function PomodoroView() {
-  const [settings, setSettings] = useState<PomodoroSettings>(() => {
-    if (typeof window !== 'undefined') {
-        const savedSettings = localStorage.getItem(POMODORO_SETTINGS_KEY);
-        if (savedSettings) {
-            try {
-                const parsed = JSON.parse(savedSettings);
-                if (parsed.workDuration && parsed.shortBreakDuration && parsed.longBreakDuration) {
-                    return parsed;
-                }
-            } catch (e) {
-                console.error("Failed to parse saved pomodoro settings:", e);
-            }
-        }
-    }
-    return {
-        workDuration: 25,
-        shortBreakDuration: 5,
-        longBreakDuration: 15,
-        longBreakInterval: 4,
-        autoStartBreaks: true,
-        autoStartPomodoros: false,
-        alarmSound: "bell", 
-        alarmVolume: 80,
-    };
-  });
-
+  const settings = usePomodoroSettings();
   const [mode, setMode] = useState<"work" | "shortBreak" | "longBreak">("work")
   const [timeLeft, setTimeLeft] = useState(settings.workDuration * 60)
   const [isActive, setIsActive] = useState(false)
@@ -104,7 +69,11 @@ export function PomodoroView() {
 
   const [completedAnimation, setCompletedAnimation] = useState(false);
 
-  const alarmRef = useRef<HTMLAudioElement | null>(null)
+  const startSoundRef = useRef<HTMLAudioElement | null>(null)
+  const endSoundRef = useRef<HTMLAudioElement | null>(null)
+  const backgroundSoundRef = useRef<HTMLAudioElement | null>(null)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isCompletingRef = useRef(false);
 
   const themeColors = {
     work: {
@@ -136,6 +105,10 @@ export function PomodoroView() {
         setTimeLeft(settings.workDuration * 60);
         setMode('work');
         setCompletedPomodorosCycle(0);
+        if (backgroundSoundRef.current) {
+            backgroundSoundRef.current.pause();
+            backgroundSoundRef.current.currentTime = 0;
+        }
     }
   }, [settings, isActive]);
 
@@ -191,88 +164,206 @@ export function PomodoroView() {
   }, [loadAllTasks, loadAllSessions]);
 
   useEffect(() => {
-    alarmRef.current = new Audio("/alarm.mp3") 
-    alarmRef.current.volume = settings.alarmVolume / 100
-    return () => {
-      if (alarmRef.current) {
-        alarmRef.current.pause()
-        alarmRef.current = null
-      }
-    }
-  }, [])
+    if (typeof window !== 'undefined') {
+        if (!startSoundRef.current) startSoundRef.current = new Audio("/audio/start.mp3");
+        if (!endSoundRef.current) endSoundRef.current = new Audio("/audio/end.mp3");
 
-  useEffect(() => {
-    if (alarmRef.current) {
-      alarmRef.current.volume = settings.alarmVolume / 100
-    }
-  }, [settings.alarmVolume])
+        const newVolume = settings.alarmVolume / 100;
+        if (startSoundRef.current) startSoundRef.current.volume = newVolume;
+        if (endSoundRef.current) endSoundRef.current.volume = newVolume;
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null
-
-    if (isActive && timeLeft > 0) {
-      interval = setInterval(() => {
-        setTimeLeft((prevTime) => prevTime - 1)
-      }, 1000)
-    } else if (isActive && timeLeft === 0) {
-      if (!isMuted && alarmRef.current) {
-        alarmRef.current.play().catch(e => console.error("Error playing sound:", e));
-      }
-
-      if (mode === "work") {
-        setCompletedAnimation(true);
-        setTimeout(() => setCompletedAnimation(false), 1200);
-        
-        const currentCycleCount = completedPomodorosCycle + 1;
-        setCompletedPomodorosCycle(currentCycleCount);
-        
-        const taskForSession = dbTasks.find(t => t.id === selectedTaskId);
-
-        if (selectedTaskId && taskForSession) {
-          const sessionData: Omit<DBSession, 'id'> = {
-            taskId: selectedTaskId,
-            startTime: new Date(Date.now() - settings.workDuration * 60 * 1000),
-            endTime: new Date(),
-            duration: settings.workDuration * 60 * 1000,
-          };
-          addToDB(ObjectStores.SESSIONS, sessionData)
-            .then(newSessionId => {
-                const newUISession: UIPomodoroSession = {
-                    ...sessionData,
-                    id: newSessionId,
-                    taskTitle: taskForSession.title
-                };
-                setSessions(prev => [newUISession, ...prev].sort((a,b) => new Date(b.endTime || 0).getTime() - new Date(a.endTime || 0).getTime()));
-                if (taskForSession.actualPomodoros !== undefined) {
-                    const updatedTask = { ...taskForSession, actualPomodoros: (taskForSession.actualPomodoros || 0) + 1, updatedAt: new Date() };
-                    updateDB(ObjectStores.TASKS, updatedTask).then(() => {
-                        setDbTasks(prevDbTasks => prevDbTasks.map(t => t.id === selectedTaskId ? updatedTask : t));
-                    }).catch(e => console.error("Failed to update task actual pomodoros",e));
-                }
-            })
-            .catch(e => console.error("Failed to save session:", e));
-        }
-
-        if (currentCycleCount % settings.longBreakInterval === 0) {
-          setMode("longBreak")
-          setTimeLeft(settings.longBreakDuration * 60)
+        const bgSoundPath = getCurrentBackgroundSoundPath(settings);
+        if (bgSoundPath) {
+            if (!backgroundSoundRef.current || backgroundSoundRef.current.src !== window.location.origin + bgSoundPath) {
+                backgroundSoundRef.current?.pause();
+                backgroundSoundRef.current = new Audio(bgSoundPath);
+                backgroundSoundRef.current.loop = true;
+            }
+            if (backgroundSoundRef.current) backgroundSoundRef.current.volume = newVolume;
         } else {
-          setMode("shortBreak")
-          setTimeLeft(settings.shortBreakDuration * 60)
+            if (backgroundSoundRef.current) {
+                backgroundSoundRef.current.pause();
+                backgroundSoundRef.current = null;
+            }
         }
-        if (!settings.autoStartBreaks) setIsActive(false);
+    }
+  }, [settings]);
 
+  const playSoundView = useCallback((soundType: 'start' | 'end') => {
+    if (isMuted || !settings.enableStartEndSounds) return;
+    const soundToPlayRef = soundType === 'start' ? startSoundRef : endSoundRef;
+    if (soundToPlayRef.current) {
+        soundToPlayRef.current.currentTime = 0;
+        soundToPlayRef.current.play().catch(e => console.error(`View: Error playing ${soundType} sound:`, e));
+    }
+  }, [isMuted, settings.enableStartEndSounds]);
+
+  const handleTimerCompleteView = useCallback(async () => {
+    if (isCompletingRef.current) {
+      console.warn("handleTimerCompleteView re-entry prevented in PomodoroView");
+      return;
+    }
+    isCompletingRef.current = true;
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    if (mode === "work") {
+      setCompletedAnimation(true);
+      setTimeout(() => setCompletedAnimation(false), 1200);
+      
+      const currentCycleCount = completedPomodorosCycle + 1;
+      setCompletedPomodorosCycle(currentCycleCount);
+      
+      const taskForSession = dbTasks.find(t => t.id === selectedTaskId);
+
+      if (selectedTaskId && taskForSession) {
+        const sessionData: Omit<DBSession, 'id'> = {
+          taskId: selectedTaskId,
+          startTime: new Date(Date.now() - settings.workDuration * 60 * 1000),
+          endTime: new Date(),
+          duration: settings.workDuration * 60 * 1000,
+        };
+        addToDB(ObjectStores.SESSIONS, sessionData)
+          .then(newSessionId => {
+              const newUISession: UIPomodoroSession = {
+                  ...sessionData,
+                  id: newSessionId,
+                  taskTitle: taskForSession.title
+              };
+              setSessions(prev => [newUISession, ...prev].sort((a,b) => new Date(b.endTime || 0).getTime() - new Date(a.endTime || 0).getTime()));
+              if (taskForSession.actualPomodoros !== undefined) {
+                  const updatedTask = { ...taskForSession, actualPomodoros: (taskForSession.actualPomodoros || 0) + 1, updatedAt: new Date() };
+                  updateDB(ObjectStores.TASKS, updatedTask).then(() => {
+                      setDbTasks(prevDbTasks => prevDbTasks.map(t => t.id === selectedTaskId ? updatedTask : t));
+                  }).catch(e => console.error("Failed to update task actual pomodoros",e));
+              }
+          })
+          .catch(e => console.error("Failed to save session:", e));
+        
+        (async () => {
+          try {
+            const endTime = new Date();
+            const startTime = new Date(endTime.getTime() - settings.workDuration * 60 * 1000);
+            const dateStr = endTime.toISOString().slice(0, 10);
+            const taskTitle = taskForSession.title || "番茄钟专注";
+            const timeBlock = {
+              title: taskTitle,
+              sourceType: "pomodoro_log",
+              startTime,
+              endTime,
+              durationMinutes: settings.workDuration,
+              isLogged: 1,
+              date: dateStr,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              taskId: selectedTaskId || undefined,
+            };
+            await addToDB(ObjectStores.TIME_BLOCKS, timeBlock);
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new Event("timelineShouldUpdate"));
+            }
+          } catch (e) {
+            console.error("添加时间块失败", e);
+          }
+        })();
+      }
+
+      if (currentCycleCount % settings.longBreakInterval === 0) {
+        setMode("longBreak");
+        setTimeLeft(settings.longBreakDuration * 60);
       } else {
-        setMode("work")
-        setTimeLeft(settings.workDuration * 60)
-        if (!settings.autoStartPomodoros) setIsActive(false);
+        setMode("shortBreak");
+        setTimeLeft(settings.shortBreakDuration * 60);
+      }
+      if (settings.autoStartBreaks) {
+        setIsActive(true);
+      } else {
+        setIsActive(false);
+      }
+
+    } else {
+      setMode("work");
+      setTimeLeft(settings.workDuration * 60);
+      if (settings.autoStartPomodoros) {
+        setIsActive(true);
+        playSoundView('start');
+      } else {
+        setIsActive(false);
+      }
+    }
+
+    setTimeout(() => {
+      isCompletingRef.current = false;
+    }, 200);
+  }, [mode, completedPomodorosCycle, settings, selectedTaskId, dbTasks, playSoundView, settings.workDuration, settings.longBreakDuration, settings.shortBreakDuration, settings.longBreakInterval, settings.autoStartBreaks, settings.autoStartPomodoros]);
+
+  useEffect(() => {
+    if (isActive && timeLeft > 0) {
+      intervalRef.current = setInterval(() => {
+        setTimeLeft((prevTime) => {
+          if (prevTime <= 1) {
+            handleTimerCompleteView();
+            return 0;
+          }
+          if (prevTime === 4) { 
+            playSoundView('end');
+          }
+          return prevTime - 1;
+        });
+      }, 1000);
+    } else if (isActive && timeLeft === 0) {
+      console.warn("PomodoroView: isActive && timeLeft === 0 condition met in useEffect.");
+      handleTimerCompleteView();
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     }
 
     return () => {
-      if (interval) clearInterval(interval)
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [isActive, timeLeft, playSoundView, handleTimerCompleteView]);
+
+  useEffect(() => {
+    if (isActive && mode === "work" && settings.backgroundSound !== 'none' && backgroundSoundRef.current && !isMuted) {
+        backgroundSoundRef.current.volume = 0;
+        backgroundSoundRef.current.play().catch(e => console.error("View BG Sound Play Error:", e));
+        let currentVolume = 0;
+        const fadeInInterval = setInterval(() => {
+            currentVolume += 0.1;
+            if (currentVolume >= settings.alarmVolume / 100) {
+                currentVolume = settings.alarmVolume / 100;
+                clearInterval(fadeInInterval);
+            }
+            if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+        }, 50);
+        return () => clearInterval(fadeInInterval);
+    } else if (backgroundSoundRef.current) {
+        let currentVolume = backgroundSoundRef.current.volume;
+        if (currentVolume > 0) {
+            const fadeOutInterval = setInterval(() => {
+                currentVolume -= 0.1;
+                if (currentVolume <= 0) {
+                    currentVolume = 0;
+                    if(backgroundSoundRef.current) backgroundSoundRef.current.pause();
+                    clearInterval(fadeOutInterval);
+                }
+                if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+            }, 50);
+            return () => clearInterval(fadeOutInterval);
+        } else {
+             backgroundSoundRef.current.pause();
+        }
     }
-  }, [isActive, timeLeft, mode, completedPomodorosCycle, settings, isMuted, selectedTaskId, dbTasks, loadAllSessions]);
+  }, [isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -303,32 +394,37 @@ export function PomodoroView() {
   }
 
   const resetCurrentTimerAndCycle = () => {
-    setIsActive(false)
-    setCompletedPomodorosCycle(0)
-    const currentModeOrDefault = mode || "work"
-    setMode(currentModeOrDefault)
+    setIsActive(false);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    setCompletedPomodorosCycle(0);
+    const currentModeOrDefault = mode || "work";
+    setMode(currentModeOrDefault);
     switch (currentModeOrDefault) {
       case "work": setTimeLeft(settings.workDuration * 60); break;
       case "shortBreak": setTimeLeft(settings.shortBreakDuration * 60); break;
       case "longBreak": setTimeLeft(settings.longBreakDuration * 60); break;
     }
+    if (backgroundSoundRef.current) {
+        backgroundSoundRef.current.pause();
+        backgroundSoundRef.current.currentTime = 0;
+    }
   }
 
   const switchModeAndReset = (newMode: "work" | "shortBreak" | "longBreak") => {
-    setIsActive(false)
-    setMode(newMode)
+    setIsActive(false);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    setMode(newMode);
     switch (newMode) {
       case "work": setTimeLeft(settings.workDuration * 60); break;
       case "shortBreak": setTimeLeft(settings.shortBreakDuration * 60); break;
       case "longBreak": setTimeLeft(settings.longBreakDuration * 60); break;
     }
+    if (backgroundSoundRef.current) {
+        backgroundSoundRef.current.pause();
+        backgroundSoundRef.current.currentTime = 0;
+    }
   }
 
-  const handleSaveSettings = (newSettings: PomodoroSettings) => {
-    setSettings(newSettings);
-    setIsSettingsOpen(false);
-  };
-  
   const todayDateStr = new Date().toDateString();
   const totalCompletedToday = sessions
     .filter(s => s.endTime && new Date(s.endTime).toDateString() === todayDateStr)
@@ -338,6 +434,21 @@ export function PomodoroView() {
   const svgCircumference = 2 * Math.PI * svgRadius;
   const progressPercentage = calculateProgressForView();
   const svgStrokeDashoffset = svgCircumference - (progressPercentage / 100) * svgCircumference;
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let originTitle = document.title;
+    if (isActive) {
+      let icon = mode === 'work' ? '🧑‍💻' : '🛎️';
+      let label = mode === 'work' ? 'Focus' : 'Break';
+      document.title = `${formatTime(timeLeft)} ${icon} · ${label}`;
+    } else {
+      document.title = originTitle;
+    }
+    return () => {
+      document.title = originTitle;
+    };
+  }, [isActive, mode, timeLeft]);
 
   return (
     <div className="container py-6 space-y-8 dark:bg-slate-900 dark:text-slate-50">
@@ -367,7 +478,7 @@ export function PomodoroView() {
                         <DialogTitle className="dark:text-slate-100">番茄钟设置</DialogTitle>
                         <DialogDescription className="dark:text-slate-400">自定义番茄钟的时间和行为</DialogDescription>
                       </DialogHeader>
-                      <PomodoroSettingsForm initialSettings={settings} onSave={handleSaveSettings} onCancel={() => setIsSettingsOpen(false)} />
+                      <PomodoroSettingsFormWrapper setIsSettingsOpen={setIsSettingsOpen} />
                     </DialogContent>
                   </Dialog>
                 </div>
@@ -444,7 +555,26 @@ export function PomodoroView() {
                 <Button
                   variant={"default"} 
                   size="icon"
-                  onClick={() => setIsActive(!isActive)}
+                  onClick={() => {
+                    const newIsActive = !isActive;
+                    setIsActive(newIsActive);
+                    if (newIsActive && mode === 'work') {
+                      playSoundView('start');
+                    } else if (!newIsActive && backgroundSoundRef.current && mode === 'work') { // Only fade out if work mode was paused
+                        let currentVolume = backgroundSoundRef.current.volume;
+                        if (currentVolume > 0) {
+                            const fadeOutInterval = setInterval(() => {
+                                currentVolume -= 0.1;
+                                if (currentVolume <= 0) {
+                                    currentVolume = 0;
+                                    if(backgroundSoundRef.current) backgroundSoundRef.current.pause();
+                                    clearInterval(fadeOutInterval);
+                                }
+                                if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+                            }, 50);
+                        }
+                    }
+                  }}
                   className={cn(
                     "h-16 w-16 rounded-full text-white transition-all duration-300 transform active:scale-95",
                     isActive ? currentTheme.buttonActive : currentTheme.button,
@@ -577,140 +707,103 @@ export function PomodoroView() {
   )
 }
 
-interface PomodoroSettingsFormProps {
-  initialSettings: PomodoroSettings;
-  onSave: (settings: PomodoroSettings) => void;
-  onCancel: () => void;
+interface PomodoroSettingsFormWrapperProps {
+  setIsSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
-function PomodoroSettingsForm({ initialSettings, onSave, onCancel }: PomodoroSettingsFormProps) {
-  const [currentSettings, setCurrentSettings] = useState<PomodoroSettings>(initialSettings);
+const PomodoroSettingsFormWrapper: React.FC<PomodoroSettingsFormWrapperProps> = ({ setIsSettingsOpen }) => {
+  const globalSettings = usePomodoroSettings();
+  const [localSettings, setLocalSettings] = useState(globalSettings);
 
   useEffect(() => {
-    setCurrentSettings(initialSettings);
-  }, [initialSettings]);
+    setLocalSettings(globalSettings);
+  }, [globalSettings]);
 
-  const handleSettingChange = (key: keyof PomodoroSettings, value: string | number | boolean) => {
-    setCurrentSettings(prev => ({ ...prev, [key]: value }));
+  const handleSettingChange = (key: keyof GlobalPomodoroSettings, value: any) => {
+    setLocalSettings(prev => ({ ...prev, [key]: value }));
   };
-
-  const handleNumericChange = (key: keyof PomodoroSettings, value: string, min: number, max: number, defaultVal: number) => {
+  
+  const handleNumericChange = (key: keyof GlobalPomodoroSettings, value: string, min: number, max: number, defaultVal: number) => {
     let numVal = Number.parseInt(value);
     if (isNaN(numVal) || numVal < min) numVal = defaultVal;
     if (numVal > max) numVal = max;
     handleSettingChange(key, numVal);
   };
 
+  const handleSave = () => {
+    if (typeof window !== 'undefined') {
+        localStorage.setItem("pomodoroSettings_v1", JSON.stringify(localSettings));
+        window.dispatchEvent(new StorageEvent('storage', {
+            key: "pomodoroSettings_v1",
+            newValue: JSON.stringify(localSettings),
+            oldValue: JSON.stringify(globalSettings), 
+            storageArea: localStorage,
+        }));
+    }
+    setIsSettingsOpen(false);
+  };
+
   return (
     <>
       <div className="grid gap-4 py-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="workDuration" className="dark:text-slate-300">工作时长 (分钟)</Label>
-            <Input
-              id="workDuration"
-              type="number"
-              min="1"
-              max="60"
-              value={currentSettings.workDuration}
-              onChange={(e) => handleNumericChange('workDuration', e.target.value, 1, 60, 25)}
-              className="dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="shortBreakDuration" className="dark:text-slate-300">短休息时长 (分钟)</Label>
-            <Input
-              id="shortBreakDuration"
-              type="number"
-              min="1"
-              max="30"
-              value={currentSettings.shortBreakDuration}
-              onChange={(e) => handleNumericChange('shortBreakDuration', e.target.value, 1, 30, 5)}
-              className="dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200"
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="longBreakDuration" className="dark:text-slate-300">长休息时长 (分钟)</Label>
-            <Input
-              id="longBreakDuration"
-              type="number"
-              min="1"
-              max="60"
-              value={currentSettings.longBreakDuration}
-              onChange={(e) => handleNumericChange('longBreakDuration', e.target.value, 1, 60, 15)}
-              className="dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="longBreakInterval" className="dark:text-slate-300">长休息间隔 (番茄钟数)</Label>
-            <Input
-              id="longBreakInterval"
-              type="number"
-              min="1"
-              max="10"
-              value={currentSettings.longBreakInterval}
-              onChange={(e) => handleNumericChange('longBreakInterval', e.target.value, 1, 10, 4)}
-              className="dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200"
-            />
-          </div>
+        <div className="space-y-2">
+            <Label htmlFor="pv-workDuration">工作时长 (分钟)</Label>
+            <Input id="pv-workDuration" type="number" min={1} max={60} value={localSettings.workDuration} 
+                   onChange={(e) => handleNumericChange('workDuration', e.target.value, 1, 60, 25)} />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="alarmSound" className="dark:text-slate-300">提示音</Label>
-          <Select
-            value={currentSettings.alarmSound}
-            onValueChange={(value) => handleSettingChange('alarmSound', value)}
-          >
-            <SelectTrigger id="alarmSound" className="dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
-              <SelectValue placeholder="选择提示音" />
-            </SelectTrigger>
-            <SelectContent className="dark:bg-slate-800 dark:border-slate-700">
-              <SelectItem value="bell" className="dark:text-slate-200 dark:focus:bg-slate-700">铃声</SelectItem>
-              <SelectItem value="digital" className="dark:text-slate-200 dark:focus:bg-slate-700">数字音</SelectItem>
-              <SelectItem value="nature" className="dark:text-slate-200 dark:focus:bg-slate-700">自然音</SelectItem>
-            </SelectContent>
-          </Select>
+            <Label htmlFor="pv-shortBreakDuration">短休息时长 (分钟)</Label>
+            <Input id="pv-shortBreakDuration" type="number" min={1} max={30} value={localSettings.shortBreakDuration} 
+                   onChange={(e) => handleNumericChange('shortBreakDuration', e.target.value, 1, 30, 5)} />
+        </div>
+        <div className="space-y-2">
+            <Label htmlFor="pv-longBreakDuration">长休息时长 (分钟)</Label>
+            <Input id="pv-longBreakDuration" type="number" min={1} max={60} value={localSettings.longBreakDuration} 
+                   onChange={(e) => handleNumericChange('longBreakDuration', e.target.value, 1, 60, 15)} />
+        </div>
+        <div className="space-y-2">
+            <Label htmlFor="pv-longBreakInterval">长休息间隔 (番茄钟数)</Label>
+            <Input id="pv-longBreakInterval" type="number" min={1} max={10} value={localSettings.longBreakInterval} 
+                   onChange={(e) => handleNumericChange('longBreakInterval', e.target.value, 1, 10, 4)} />
+        </div>
+        <div className="flex items-center space-x-2 pt-2">
+          <Switch id="pv-enableStartEndSounds" checked={localSettings.enableStartEndSounds} 
+                  onCheckedChange={(checked) => handleSettingChange('enableStartEndSounds', checked)} />
+          <Label htmlFor="pv-enableStartEndSounds">播放开始/结束音效</Label>
+        </div>
+        <div className="space-y-2">
+            <Label htmlFor="pv-backgroundSound">背景音</Label>
+            <Select value={localSettings.backgroundSound} onValueChange={(value) => handleSettingChange('backgroundSound', value)}>
+                <SelectTrigger id="pv-backgroundSound"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                    {globalBackgroundSoundOptions.map((opt) => 
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    )}
+                </SelectContent>
+            </Select>
         </div>
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label htmlFor="alarmVolume" className="dark:text-slate-300">音量</Label>
-            <span className="text-sm dark:text-slate-400">{currentSettings.alarmVolume}%</span>
+            <Label htmlFor="pv-alarmVolume">音量</Label>
+            <span>{localSettings.alarmVolume}%</span>
           </div>
-          <Slider
-            id="alarmVolume"
-            min={0}
-            max={100}
-            step={1}
-            value={[currentSettings.alarmVolume]}
-            onValueChange={(value) => handleSettingChange('alarmVolume', value[0])}
-            className="[&>span:first-child]:bg-primary [&>span:first-child_span]:bg-white dark:[&>span:first-child]:bg-slate-500 dark:[&>span:first-child_span]:bg-slate-300"
-          />
+          <Slider id="pv-alarmVolume" min={0} max={100} step={1} value={[localSettings.alarmVolume]} 
+                  onValueChange={(value) => handleSettingChange('alarmVolume', value[0])} />
         </div>
         <div className="flex items-center space-x-2 pt-2">
-          <Switch
-            id="autoStartBreaks"
-            checked={currentSettings.autoStartBreaks}
-            onCheckedChange={(checked) => handleSettingChange('autoStartBreaks', checked)}
-            className="data-[state=checked]:bg-primary dark:data-[state=checked]:bg-slate-500"
-          />
-          <Label htmlFor="autoStartBreaks" className="dark:text-slate-300">自动开始休息</Label>
+          <Switch id="pv-autoStartBreaks" checked={localSettings.autoStartBreaks} 
+                  onCheckedChange={(checked) => handleSettingChange('autoStartBreaks', checked)} />
+          <Label htmlFor="pv-autoStartBreaks">自动开始休息</Label>
         </div>
         <div className="flex items-center space-x-2">
-          <Switch
-            id="autoStartPomodoros"
-            checked={currentSettings.autoStartPomodoros}
-            onCheckedChange={(checked) => handleSettingChange('autoStartPomodoros', checked)}
-            className="data-[state=checked]:bg-primary dark:data-[state=checked]:bg-slate-500"
-          />
-          <Label htmlFor="autoStartPomodoros" className="dark:text-slate-300">自动开始番茄钟</Label>
+          <Switch id="pv-autoStartPomodoros" checked={localSettings.autoStartPomodoros} 
+                  onCheckedChange={(checked) => handleSettingChange('autoStartPomodoros', checked)} />
+          <Label htmlFor="pv-autoStartPomodoros">自动开始番茄钟</Label>
         </div>
       </div>
       <DialogFooter className="dark:border-t dark:border-slate-700 pt-4">
-        <Button variant="outline" onClick={onCancel} className="dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-700">
-          取消
-        </Button>
-        <Button onClick={() => onSave(currentSettings)} className="bg-primary hover:bg-primary/90 dark:bg-slate-600 dark:hover:bg-slate-500 dark:text-slate-100">保存</Button>
+        <Button variant="outline" onClick={() => setIsSettingsOpen(false)}>取消</Button>
+        <Button onClick={handleSave}>保存</Button>
       </DialogFooter>
     </>
   );
@@ -719,7 +812,7 @@ function PomodoroSettingsForm({ initialSettings, onSave, onCancel }: PomodoroSet
 interface HistoryListProps {
     sessions: UIPomodoroSession[];
     period: "today" | "week" | "month";
-    settings: PomodoroSettings;
+    settings: GlobalPomodoroSettings;
 }
 
 function HistoryList({ sessions, period, settings }: HistoryListProps) {

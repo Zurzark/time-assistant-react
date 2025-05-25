@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { SkipForward, RefreshCw, Loader2, AlertCircle } from "lucide-react"
-import { type Task as DBTask, ObjectStores, getAll, add as addTaskToDB } from "@/lib/db"
+import { type Task as DBTask, ObjectStores, getAll, add as addTaskToDB, add as addToDB } from "@/lib/db"
 import { cn } from "@/lib/utils"
+import { usePomodoroSettings, getCurrentBackgroundSoundPath } from "@/lib/pomodoro-settings"
 
 // --- SVG Icon Components ---
 
@@ -53,19 +54,27 @@ const PomodoroCounterIcon = ({ filled, className }: { filled: boolean, className
 );
 
 export function PomodoroCard() {
-  const [time, setTime] = useState(25 * 60)
-  const [isActive, setIsActive] = useState(false)
-  const [mode, setMode] = useState<"work" | "shortBreak" | "longBreak">("work")
-  const [pomodoroCount, setPomodoroCount] = useState(0)
+  const settings = usePomodoroSettings();
+  const [time, setTime] = useState(settings.workDuration * 60);
+  const [isActive, setIsActive] = useState(false);
+  const [mode, setMode] = useState<"work" | "shortBreak" | "longBreak">("work");
+  const [pomodoroCount, setPomodoroCount] = useState(0);
   
   const [dbTasks, setDbTasks] = useState<DBTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [loadTasksError, setLoadTasksError] = useState<string | null>(null);
   
   const [selectedTaskId, setSelectedTaskId] = useState<string | number | null>(null);
-  const [customTaskTitle, setCustomTaskTitle] = useState("")
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [customTaskTitle, setCustomTaskTitle] = useState("");
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const [completedAnimation, setCompletedAnimation] = useState(false);
+  const isCompletingRef = useRef(false);
+
+  // 新增：音效相关的 refs 和 state
+  const startSoundRef = useRef<HTMLAudioElement | null>(null);
+  const endSoundRef = useRef<HTMLAudioElement | null>(null);
+  const backgroundSoundRef = useRef<HTMLAudioElement | null>(null);
+  const [isMuted, setIsMuted] = useState(false); // 假设卡片组件有自己的静音控制，或从全局状态读取
 
   // Thematic colors
   const themeColors = {
@@ -92,10 +101,77 @@ export function PomodoroCard() {
   const currentTheme = themeColors[mode];
 
   const durations = {
-    work: 25 * 60,
-    shortBreak: 5 * 60,
-    longBreak: 15 * 60,
+    work: settings.workDuration * 60,
+    shortBreak: settings.shortBreakDuration * 60,
+    longBreak: settings.longBreakDuration * 60,
   }
+
+  // 初始化音效
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      startSoundRef.current = new Audio("/audio/start.mp3");
+      endSoundRef.current = new Audio("/audio/end.mp3");
+      
+      const bgSoundPath = getCurrentBackgroundSoundPath(settings);
+      if (bgSoundPath) {
+        backgroundSoundRef.current = new Audio(bgSoundPath);
+        backgroundSoundRef.current.loop = true;
+      } else {
+        if (backgroundSoundRef.current) {
+          backgroundSoundRef.current.pause();
+          backgroundSoundRef.current = null;
+        }
+      }
+    }
+    // 清理函数
+    return () => {
+      startSoundRef.current?.pause();
+      endSoundRef.current?.pause();
+      backgroundSoundRef.current?.pause();
+    };
+  }, [settings.backgroundSound]); // 当背景音设置改变时重新初始化
+
+  // 更新音量
+  useEffect(() => {
+    const volume = settings.alarmVolume / 100;
+    if (startSoundRef.current) startSoundRef.current.volume = volume;
+    if (endSoundRef.current) endSoundRef.current.volume = volume;
+    if (backgroundSoundRef.current) backgroundSoundRef.current.volume = volume;
+  }, [settings.alarmVolume]);
+
+  // 背景音播放控制
+  useEffect(() => {
+    if (isActive && mode === "work" && settings.backgroundSound !== 'none' && backgroundSoundRef.current && !isMuted) {
+      // 淡入
+      backgroundSoundRef.current.volume = 0;
+      backgroundSoundRef.current.play().catch(e => console.error("Error playing background sound:", e));
+      let currentVolume = 0;
+      const fadeInInterval = setInterval(() => {
+        currentVolume += 0.1;
+        if (currentVolume >= settings.alarmVolume / 100) {
+          currentVolume = settings.alarmVolume / 100;
+          clearInterval(fadeInInterval);
+        }
+        if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+      }, 50); // 每50ms增加音量，0.5秒完成淡入
+    } else if (backgroundSoundRef.current) {
+      // 淡出
+      let currentVolume = backgroundSoundRef.current.volume;
+      if (currentVolume > 0) {
+        const fadeOutInterval = setInterval(() => {
+          currentVolume -= 0.1;
+          if (currentVolume <= 0) {
+            currentVolume = 0;
+            if(backgroundSoundRef.current) backgroundSoundRef.current.pause();
+            clearInterval(fadeOutInterval);
+          }
+          if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+        }, 50);
+      } else {
+         backgroundSoundRef.current.pause();
+      }
+    }
+  }, [isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted]);
 
   const loadTasks = useCallback(async () => {
     setLoadingTasks(true);
@@ -116,51 +192,135 @@ export function PomodoroCard() {
     loadTasks();
   }, [loadTasks]);
 
+  const playSound = useCallback((soundType: 'start' | 'end') => {
+    if (isMuted || !settings.enableStartEndSounds) return;
+    const soundRef = soundType === 'start' ? startSoundRef : endSoundRef;
+    if (soundRef.current) {
+      soundRef.current.currentTime = 0;
+      soundRef.current.play().catch(e => console.error(`Error playing ${soundType} sound on card:`, e));
+    }
+  }, [isMuted, settings.enableStartEndSounds]); // startSoundRef and endSoundRef are stable
+
   useEffect(() => {
     if (isActive) {
       intervalRef.current = setInterval(() => {
         setTime((prevTime) => {
           if (prevTime <= 1) {
-            handleTimerComplete()
-            return 0
+            handleTimerComplete();
+            return 0;
           }
-          return prevTime - 1
-        })
-      }, 1000)
+          if (prevTime === 4) { 
+            playSound('end');
+          }
+          return prevTime - 1;
+        });
+      }, 1000);
+    } else if (isActive && time === 0) {
+        console.warn("PomodoroCard: isActive && time === 0 condition met in useEffect.");
+        handleTimerComplete();
     } else if (intervalRef.current) {
-      clearInterval(intervalRef.current)
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
-
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, playSound, time]);
+
+  useEffect(() => {
+    setIsActive(false);
+    setTime(settings.workDuration * 60);
+    setMode("work");
+    setPomodoroCount(0);
+    if (backgroundSoundRef.current) {
+      backgroundSoundRef.current.pause();
+      backgroundSoundRef.current.currentTime = 0;
     }
-  }, [isActive, time]);
+  }, [settings.workDuration, settings.shortBreakDuration, settings.longBreakDuration, settings.longBreakInterval]);
 
-  const handleTimerComplete = () => {
-    if(intervalRef.current) clearInterval(intervalRef.current!)
-    setIsActive(false)
+  const handleTimerComplete = async () => {
+    if (isCompletingRef.current) {
+      console.warn("handleTimerComplete re-entry prevented in PomodoroCard");
+      return;
+    }
+    isCompletingRef.current = true;
 
-    // Trigger celebration for completing a work pomodoro
+    if(intervalRef.current) {
+      clearInterval(intervalRef.current!);
+      intervalRef.current = null;
+    }
+
     if (mode === "work") {
       const newCount = pomodoroCount + 1;
       setPomodoroCount(newCount);
       setCompletedAnimation(true);
-      setTimeout(() => setCompletedAnimation(false), 1000); // Reset animation state
-
-      if (newCount % 4 === 0) {
-        setMode("longBreak")
-        setTime(durations.longBreak)
-      } else {
-        setMode("shortBreak")
-        setTime(durations.shortBreak)
+      setTimeout(() => setCompletedAnimation(false), 1000);
+      try {
+        const endTime = new Date();
+        const startTime = new Date(endTime.getTime() - settings.workDuration * 60 * 1000);
+        const dateStr = endTime.toISOString().slice(0, 10);
+        const taskTitle = selectedTaskId === "new"
+          ? customTaskTitle
+          : dbTasks.find(t => t.id === selectedTaskId)?.title || "番茄钟专注";
+        const timeBlock = {
+          title: taskTitle,
+          sourceType: "pomodoro_log",
+          startTime,
+          endTime,
+          durationMinutes: settings.workDuration,
+          isLogged: 1,
+          date: dateStr,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          taskId: selectedTaskId && selectedTaskId !== "new" ? selectedTaskId : undefined,
+        };
+        await addToDB(ObjectStores.TIME_BLOCKS, timeBlock);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("timelineShouldUpdate"));
+        }
+      } catch (e) {
+        console.error("添加时间块失败", e);
       }
-    } else {
-      setMode("work")
-      setTime(durations.work)
+
+      if (newCount % settings.longBreakInterval === 0) {
+        setMode("longBreak");
+        setTime(durations.longBreak);
+        if (settings.autoStartBreaks) {
+            setIsActive(true);
+        } else {
+            setIsActive(false); 
+        }
+      } else {
+        setMode("shortBreak");
+        setTime(durations.shortBreak);
+        if (settings.autoStartBreaks) {
+            setIsActive(true);
+        } else {
+            setIsActive(false);
+        }
+      }
+    } else { // Break ended
+      setMode("work");
+      setTime(durations.work); // Crucial: Reset time first
+      if (settings.autoStartPomodoros) {
+        setIsActive(true);
+        playSound('start'); 
+      } else {
+        setIsActive(false); // Explicitly set inactive if not auto-starting pomos
+      }
     }
-  }
+
+    setTimeout(() => {
+      isCompletingRef.current = false;
+    }, 200);
+  };
 
   const handleStartTimer = async () => {
+    let canStart = false;
     if (selectedTaskId === "new" && customTaskTitle.trim() !== "") {
       try {
         const newTaskData: Omit<DBTask, 'id'> = {
@@ -179,7 +339,7 @@ export function PomodoroCard() {
           setDbTasks(prev => [newTaskForUI, ...prev]);
           setSelectedTaskId(newTaskId);
           setCustomTaskTitle("");
-          setIsActive(true);
+          canStart = true;
         } else {
           alert("创建新任务失败，请重试。");
         }
@@ -189,37 +349,64 @@ export function PomodoroCard() {
         return;
       }
     } else if (selectedTaskId && selectedTaskId !== "new") {
-      setIsActive(true);
+      canStart = true;
     } else if (!selectedTaskId && customTaskTitle.trim() === ""){
       alert("请选择一个任务或输入新任务名称。");
-    } else if (customTaskTitle.trim() !== "") { // Allow starting with custom task not yet saved
+    } else if (customTaskTitle.trim() !== "") { 
+      canStart = true;
+    }
+
+    if(canStart) {
       setIsActive(true);
-    } else {
-       alert("请选择一个任务或输入新任务名称。"); // Fallback if no task and no custom title
+      if(mode === 'work') playSound('start');
     }
   };
 
   const toggleTimer = () => {
     if (isActive) {
       setIsActive(false);
+      // Optional: Add fade out for background sound if timer is paused manually
+      if (mode === 'work' && backgroundSoundRef.current && backgroundSoundRef.current.volume > 0) {
+        let currentVolume = backgroundSoundRef.current.volume;
+        const fadeOutInterval = setInterval(() => {
+          currentVolume -= 0.1;
+          if (currentVolume <= 0) {
+            currentVolume = 0;
+            if(backgroundSoundRef.current) backgroundSoundRef.current.pause();
+            clearInterval(fadeOutInterval);
+          }
+          if (backgroundSoundRef.current) backgroundSoundRef.current.volume = currentVolume;
+        }, 50);
+      }
     } else {
       handleStartTimer();
     }
   };
 
   const resetTimer = () => {
-    setIsActive(false)
-    setTime(durations[mode])
-  }
+    setIsActive(false);
+    setTime(durations[mode]);
+    if (backgroundSoundRef.current) {
+      backgroundSoundRef.current.pause();
+      backgroundSoundRef.current.currentTime = 0;
+    }
+  };
 
   const skipTimer = () => {
+    // For immediate skip, play end sound now (if enabled) then complete.
+    playSound('end'); 
     handleTimerComplete(); 
-  }
+  };
 
   const completePomodoroAction = () => {
-    // handleTimerComplete already increments pomodoroCount and triggers animation for work mode.
-    handleTimerComplete();
-  }
+    if (mode === 'work') {
+      // For immediate completion, play end sound now (if enabled) then complete.
+      playSound('end');
+      handleTimerComplete(); 
+    } else {
+      console.warn("Complete action called in non-work mode");
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -264,6 +451,21 @@ export function PomodoroCard() {
       default: return "工作时段";
     }
   };
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let originTitle = document.title;
+    if (isActive) {
+      let icon = mode === 'work' ? '🧑‍💻' : '🛎️';
+      let label = mode === 'work' ? 'Focus' : 'Break';
+      document.title = `${formatTime(time)} ${icon} · ${label}`;
+    } else {
+      document.title = originTitle;
+    }
+    return () => {
+      document.title = originTitle;
+    };
+  }, [isActive, mode, time]);
 
   return (
     <Card className="shadow-lg overflow-hidden relative">
