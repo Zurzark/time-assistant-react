@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Task, TaskPriority } from '@/lib/task-utils';
 import { Project as DBProjectType, Tag as DBTagType } from '@/lib/db'; // Corrected import for DB types
 import { DateRange } from 'react-day-picker';
-import { format, isPast } from 'date-fns';
+import { format, isPast, startOfDay } from 'date-fns';
 import { useDebounce } from "@/lib/client-hooks"; // Import the hook
 
 // Define task category constants - Copied from TasksView
@@ -55,6 +55,9 @@ export function useTaskFiltersAndSort({
 
     const filteredTasks = useMemo(() => {
         return tasks.filter((task) => {
+            const now = new Date();
+            // 统一过期判定逻辑
+            const isTaskOverdue = task.dueDate && !task.completed && startOfDay(now) > startOfDay(new Date(task.dueDate));
             if (selectedView === "completed") {
                 if (!task.completed) return false;
             } else if (selectedView === "next-actions") {
@@ -64,10 +67,8 @@ export function useTaskFiltersAndSort({
             } else if (selectedView === "waiting") {
                 if (task.completed || task.category !== TASK_CATEGORY_WAITING_FOR) return false;
             } else if (selectedView === "in-progress") {
-                const isTaskOverdue = task.dueDate && isPast(new Date(task.dueDate)) && !task.completed;
                 if (task.completed || isTaskOverdue) return false;
             } else if (selectedView === "overdue") {
-                const isTaskOverdue = task.dueDate && isPast(new Date(task.dueDate)) && !task.completed;
                 if (!isTaskOverdue) return false;
             }
 

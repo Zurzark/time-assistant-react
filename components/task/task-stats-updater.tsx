@@ -166,6 +166,9 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
                 ruleOptions.freq = RRule.MONTHLY;
               } else if (jsonRule.frequency === 'yearly') {
                 ruleOptions.freq = RRule.YEARLY;
+              } else if (jsonRule.frequency === 'workdays') {
+                ruleOptions.freq = RRule.WEEKLY;
+                ruleOptions.byweekday = [RRule.MO, RRule.TU, RRule.WE, RRule.TH, RRule.FR];
               }
               
               // 设置其他选项...
@@ -203,19 +206,28 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
       };
 
       const filteredTasks = tasksForProcessing.filter(task => {
-        if (timeRange === "all") return true; 
+        if (timeRange === "all") return true;
+
+        // 只要已完成且完成时间在范围内，直接计入
+        if (task.completed === 1 && task.completedAt && isWithinInterval(task.completedAt, { start: rangeStart, end: rangeEnd })) {
+          return true;
+        }
 
         if (task.isRecurring === 0) {
-          if (!task.plannedDate) {
-            return !task.dueDate || isAfter(task.dueDate, startOfDay(rangeStart)) || isEqual(task.dueDate, startOfDay(rangeStart));
-          } else {
-            const plannedBeforeOrOnRangeEnd = isBefore(task.plannedDate, endOfDay(rangeEnd)) || isEqual(task.plannedDate, endOfDay(rangeEnd));
-            const dueDateLogic = !task.dueDate || isAfter(task.dueDate, startOfDay(rangeStart)) || isEqual(task.dueDate, startOfDay(rangeStart));
-            return plannedBeforeOrOnRangeEnd && dueDateLogic;
+          // 只要plannedDate在范围内即可
+          const plannedInRange = !task.plannedDate || (
+            (isBefore(task.plannedDate, endOfDay(rangeEnd)) || isEqual(task.plannedDate, endOfDay(rangeEnd)))
+          );
+          if (!plannedInRange) return false;
+          // 只要未完成，且dueDate小于今天，也要计入（即已过期）
+          if (!task.completed && task.dueDate && isBefore(task.dueDate, startOfDay(today))) {
+            return true;
           }
-        }
-        else {
-          if (!task.plannedDate) return false; 
+          // 其他情况保持原有逻辑
+          const dueDateLogic = !task.dueDate || isAfter(task.dueDate, startOfDay(rangeStart)) || isEqual(task.dueDate, startOfDay(rangeStart));
+          return dueDateLogic;
+        } else {
+          if (!task.plannedDate) return false;
           const plannedBeforeOrOnRangeEnd = isBefore(task.plannedDate, endOfDay(rangeEnd)) || isEqual(task.plannedDate, endOfDay(rangeEnd));
           return plannedBeforeOrOnRangeEnd && isRecurringTaskOccurringInDateRange(task, rangeStart, rangeEnd);
         }
@@ -245,10 +257,10 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
         if (task.category === 'next_action') {
           newNextAction++;
           if (!isCompleted) {
-            if (task.dueDate && (isBefore(task.dueDate, todayStart) || isEqual(task.dueDate, todayStart))) {
+            if (task.dueDate && isBefore(task.dueDate, todayStart)) {
               newOverdue++;
             } 
-            else { 
+            else {
               newInProgress++;
             }
           }
@@ -289,10 +301,12 @@ export function TaskStatsProvider({ children }: { children: React.ReactNode }) {
     const handleDataChange = () => {
       calculateStats();
     };
-    window.addEventListener('taskDataChangedForStats', handleDataChange);
-    return () => {
-      window.removeEventListener('taskDataChangedForStats', handleDataChange);
-    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('taskDataChangedForStats', handleDataChange);
+      return () => {
+        window.removeEventListener('taskDataChangedForStats', handleDataChange);
+      };
+    }
   }, [calculateStats]);
 
   return (

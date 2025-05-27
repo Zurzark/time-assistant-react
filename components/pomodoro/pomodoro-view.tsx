@@ -75,6 +75,8 @@ export function PomodoroView() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const isCompletingRef = useRef(false);
 
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
+
   const themeColors = {
     work: {
       progress: "#FF6347", text: "text-slate-700 dark:text-slate-200",
@@ -189,14 +191,19 @@ export function PomodoroView() {
     }
   }, [settings]);
 
+  const handleUserInteract = useCallback(() => {
+    if (!hasUserInteracted) setHasUserInteracted(true);
+  }, [hasUserInteracted]);
+
   const playSoundView = useCallback((soundType: 'start' | 'end') => {
+    if (!hasUserInteracted) return;
     if (isMuted || !settings.enableStartEndSounds) return;
     const soundToPlayRef = soundType === 'start' ? startSoundRef : endSoundRef;
     if (soundToPlayRef.current) {
         soundToPlayRef.current.currentTime = 0;
         soundToPlayRef.current.play().catch(e => console.error(`View: Error playing ${soundType} sound:`, e));
     }
-  }, [isMuted, settings.enableStartEndSounds]);
+  }, [isMuted, settings.enableStartEndSounds, hasUserInteracted]);
 
   const handleTimerCompleteView = useCallback(async () => {
     if (isCompletingRef.current) {
@@ -333,6 +340,7 @@ export function PomodoroView() {
   }, [isActive, timeLeft, playSoundView, handleTimerCompleteView]);
 
   useEffect(() => {
+    if (!hasUserInteracted) return;
     if (isActive && mode === "work" && settings.backgroundSound !== 'none' && backgroundSoundRef.current && !isMuted) {
         backgroundSoundRef.current.volume = 0;
         backgroundSoundRef.current.play().catch(e => console.error("View BG Sound Play Error:", e));
@@ -363,7 +371,7 @@ export function PomodoroView() {
              backgroundSoundRef.current.pause();
         }
     }
-  }, [isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted]);
+  }, [isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted, hasUserInteracted]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -394,6 +402,7 @@ export function PomodoroView() {
   }
 
   const resetCurrentTimerAndCycle = () => {
+    handleUserInteract();
     setIsActive(false);
     if (intervalRef.current) clearInterval(intervalRef.current);
     setCompletedPomodorosCycle(0);
@@ -411,6 +420,7 @@ export function PomodoroView() {
   }
 
   const switchModeAndReset = (newMode: "work" | "shortBreak" | "longBreak") => {
+    handleUserInteract();
     setIsActive(false);
     if (intervalRef.current) clearInterval(intervalRef.current);
     setMode(newMode);

@@ -3,7 +3,7 @@
 // 并提供任务关联、时间详情和备注等信息。
 "use client"
 
-import { format, differenceInMinutes } from "date-fns";
+import { format, differenceInMinutes, isValid } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import { Clock, MoreHorizontal, Plus, CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -109,9 +109,12 @@ export function SelectedDateEvents({
               const categoryInfo = getActivityCategoryInfo(block.activityCategoryId);
               const task = block.taskId ? tasks.find(t => t.id === block.taskId) : undefined;
               
-              const startTime = block.isLogged ? block.actualStartTime! : block.startTime!;
-              const endTime = block.isLogged ? block.actualEndTime! : block.endTime!;
-              const duration = differenceInMinutes(endTime, startTime);
+              // 修复：防止无效时间导致format报错
+              const rawStartTime = block.isLogged ? block.actualStartTime : block.startTime;
+              const rawEndTime = block.isLogged ? block.actualEndTime : block.endTime;
+              const startTime = (rawStartTime instanceof Date && isValid(rawStartTime)) ? rawStartTime : undefined;
+              const endTime = (rawEndTime instanceof Date && isValid(rawEndTime)) ? rawEndTime : undefined;
+              const duration = (startTime && endTime) ? differenceInMinutes(endTime, startTime) : 0;
 
               return (
                 <div 
@@ -190,7 +193,7 @@ export function SelectedDateEvents({
                   <div className="flex items-center justify-end text-xs text-muted-foreground">
                     <Clock className="h-3 w-3 mr-1" />
                     <span>
-                      {format(startTime, "HH:mm")} - {format(endTime, "HH:mm")}
+                      {startTime && endTime ? `${format(startTime, "HH:mm")} - ${format(endTime, "HH:mm")}` : "--"}
                     </span>
                     <span className="mx-1">|</span>
                     <span>{formatDuration(duration)}</span>

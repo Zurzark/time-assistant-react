@@ -70,16 +70,19 @@ export function TodayDashboard() {
     console.log("Content created successfully via UnifiedAddModal, refreshing TodayFocusTasks.")
     triggerTodayFocusRefresh()
     setEditingTask(null)
+    window.dispatchEvent(new CustomEvent('taskDataChangedForStats'))
   }
 
   const handleOpenEditTaskModal = (task: TaskUtilsTask) => {
     setEditingTask(task)
     setIsUnifiedAddModalOpen(true)
+    window.dispatchEvent(new CustomEvent('taskDataChangedForStats'))
   }
 
   const handleOpenUnifiedAddModalForNewTask = () => {
     setEditingTask(null); //确保是新建任务模式
     setIsUnifiedAddModalOpen(true);
+    window.dispatchEvent(new CustomEvent('taskDataChangedForStats'))
   };
 
   const getProjectNameById = (projectId: number | string | undefined): string => {
@@ -102,6 +105,7 @@ export function TodayDashboard() {
         await db.update(db.ObjectStores.TASKS, taskToUpdate);
         triggerTodayFocusRefresh(); // Refresh UI after DB update
         console.log("Task completion status updated in DB and UI refreshed.");
+        window.dispatchEvent(new CustomEvent('taskDataChangedForStats'))
       } else {
         console.warn("Task not found for toggling completion, ID:", taskId);
       }
@@ -121,6 +125,7 @@ export function TodayDashboard() {
         await db.update(db.ObjectStores.TASKS, taskToDelete);
         triggerTodayFocusRefresh(); // Refresh UI after DB update
         console.log("Task marked as deleted in DB and UI refreshed.");
+        window.dispatchEvent(new CustomEvent('taskDataChangedForStats'))
       } else {
         console.warn("Task not found for deletion, ID:", taskId);
       }
@@ -139,6 +144,7 @@ export function TodayDashboard() {
         await db.update(db.ObjectStores.TASKS, taskToUpdate);
         triggerTodayFocusRefresh(); // Refresh UI after DB update
         console.log("Task frog status updated in DB and UI refreshed.");
+        window.dispatchEvent(new CustomEvent('taskDataChangedForStats'))
       } else {
         console.warn("Task not found for toggling frog status, ID:", taskId);
       }
@@ -194,7 +200,6 @@ export function TodayDashboard() {
             <div className="flex-grow flex flex-col min-h-0">
               <TodayFocusTasks
                 key={todayFocusRefreshKey}
-                refreshTrigger={todayFocusRefreshKey}
                 getProjectNameById={getProjectNameById}
                 onEditTask={onEditTask}
                 onToggleComplete={onToggleComplete}

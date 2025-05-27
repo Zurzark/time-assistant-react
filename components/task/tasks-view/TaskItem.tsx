@@ -160,7 +160,8 @@ export function TaskItem({
         onEditTask(task);
     };
 
-    const isOverdue = task.dueDate && isPast(task.dueDate) && !task.completed;
+    const now = new Date();
+    const isOverdue = task.dueDate && !task.completed && startOfDay(now) > startOfDay(new Date(task.dueDate));
     const isNormal = !task.completed && !isOverdue;
 
     const cardClasses = cn(

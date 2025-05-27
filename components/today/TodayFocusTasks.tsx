@@ -9,7 +9,7 @@ import { TaskItem } from "@/components/task/tasks-view/TaskItem";
 import { Task, TaskPriority as TaskUtilsPriority, TaskCategory as UtilsTaskCategory, fromDBTaskShape } from "@/lib/task-utils";
 import * as db from "@/lib/db"; // Assuming db.Task and db.getAll etc.
 import {
-    isToday,
+    isToday, // Keep for specific checks if needed, but general range check is better
     isPast,
     isFuture,
     addDays,
@@ -37,7 +37,6 @@ interface TodayFocusTasksProps {
     onToggleFrogStatus: (taskId: number) => void;
     onAddTaskToTimeline: (task: Task) => void;
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
-    refreshTrigger: number;
     onOpenUnifiedAddModalForNewTask: () => void;
 }
 
@@ -70,7 +69,6 @@ export function TodayFocusTasks({
     onToggleFrogStatus,
     onAddTaskToTimeline,
     onPomodoroClick,
-    refreshTrigger,
     onOpenUnifiedAddModalForNewTask,
 }: TodayFocusTasksProps) {
     const [activeTab, setActiveTab] = useState<TabValue>("inProgress");
@@ -80,6 +78,8 @@ export function TodayFocusTasks({
     // 添加删除确认对话框状态
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     useEffect(() => {
         async function fetchTasks() {
@@ -106,12 +106,91 @@ export function TodayFocusTasks({
         fetchTasks();
     }, [refreshTrigger]); // Depend on refreshTrigger
 
+    // 监听全局任务数据变更事件，自动刷新
+    useEffect(() => {
+        const handler = () => {
+            setRefreshTrigger(prev => prev + 1);
+        };
+        window.addEventListener('taskDataChangedForStats', handler);
+        return () => window.removeEventListener('taskDataChangedForStats', handler);
+    }, []);
+
     const getSafeDate = (dateInput: Date | string | undefined): Date | null => {
         if (!dateInput) return null;
         const date = dateInput instanceof Date ? dateInput : parseISO(String(dateInput));
         return isNaN(date.getTime()) ? null : date;
     };
     
+    // Helper for recurring task check, consistent with task-stats-updater
+    const isRecurringTaskOccurringToday = (task: Task, todayStart: Date, todayEnd: Date): boolean => {
+        if (!task.isRecurring || !task.recurrenceRule || !task.plannedDate) return false;
+        const dtstart = getSafeDate(task.plannedDate);
+        if (!dtstart) return false;
+
+        let ruleOptions: Partial<RRuleOptions> = { dtstart };
+        try {
+            if (typeof task.recurrenceRule === 'string' && task.recurrenceRule.startsWith('{')) {
+                const jsonRule = JSON.parse(task.recurrenceRule);
+                if (jsonRule.frequency === 'daily') ruleOptions.freq = RRule.DAILY;
+                else if (jsonRule.frequency === 'weekly') ruleOptions.freq = RRule.WEEKLY;
+                else if (jsonRule.frequency === 'monthly') ruleOptions.freq = RRule.MONTHLY;
+                else if (jsonRule.frequency === 'yearly') ruleOptions.freq = RRule.YEARLY;
+                else if (jsonRule.frequency === 'workdays') {
+                    ruleOptions.freq = RRule.WEEKLY;
+                    ruleOptions.byweekday = [RRule.MO, RRule.TU, RRule.WE, RRule.TH, RRule.FR];
+                }
+                if (jsonRule.endsType === 'on_date' && jsonRule.endDate) {
+                    const untilDate = getSafeDate(jsonRule.endDate);
+                    if (untilDate) ruleOptions.until = endOfDay(untilDate);
+                }
+                if (jsonRule.endsType === 'after_occurrences' && jsonRule.occurrences) {
+                    ruleOptions.count = jsonRule.occurrences;
+                }
+            } else if (typeof task.recurrenceRule === 'string') {
+                const tempRule = RRule.fromString(task.recurrenceRule.startsWith('RRULE:') ? task.recurrenceRule : 'RRULE:' + task.recurrenceRule);
+                ruleOptions = { ...tempRule.options, dtstart };
+            } else if (typeof task.recurrenceRule === 'object' && task.recurrenceRule !== null) {
+                 ruleOptions = { ...(task.recurrenceRule as object), dtstart };
+            } else {
+                return false;
+            }
+
+            const recurrenceEndDate = getSafeDate(task.recurrenceEndDate);
+            if (recurrenceEndDate) ruleOptions.until = endOfDay(recurrenceEndDate);
+            if (task.recurrenceCount) ruleOptions.count = task.recurrenceCount;
+            
+            const rule = new RRule(ruleOptions);
+            return rule.between(todayStart, todayEnd, true).length > 0;
+        } catch (e) {
+            console.error("Error in isRecurringTaskOccurringToday:", e, task.recurrenceRule);
+            return false;
+        }
+    };
+    
+    const tasksFilteredForToday = useMemo(() => {
+        if (isLoading) return [];
+        const today = new Date();
+        const todayStart = startOfDay(today);
+        const todayEnd = endOfDay(today);
+
+        return allUtilTasks.filter(task => {
+            const plannedDate = getSafeDate(task.plannedDate);
+            const dueDate = getSafeDate(task.dueDate);
+            const completedAt = getSafeDate(task.completedAt);
+            const isOverdueTask = !task.completed && dueDate && isBefore(dueDate, todayStart);
+            const isCompletedToday = task.completed && completedAt && isWithinInterval(completedAt, { start: todayStart, end: todayEnd });
+
+            if (task.isRecurring) {
+                return isRecurringTaskOccurringToday(task, todayStart, todayEnd);
+            } else {
+                const plannedOk = !plannedDate || isBefore(plannedDate, todayEnd) || isEqual(plannedDate, todayEnd);
+                const dueOk = !dueDate || isAfter(dueDate, todayStart) || isEqual(dueDate, todayStart);
+                const mainConditionsMet = plannedOk && dueOk;
+                return mainConditionsMet || isOverdueTask || isCompletedToday;
+            }
+        });
+    }, [allUtilTasks, isLoading]);
+
     const memoizedFilteredTasks = useMemo(() => {
         if (isLoading) return [];
         const today = new Date();
@@ -122,33 +201,36 @@ export function TodayFocusTasks({
 
         let filtered: Task[] = [];
 
+        // Start with tasks already filtered for "Today" context
+        const baseTasksForTab = tasksFilteredForToday;
+
         switch (activeTab) {
             case "inProgress":
-                filtered = allUtilTasks.filter(task => {
-                    // 完全等同于任务统计中的进行中
+                filtered = baseTasksForTab.filter(task => {
+                    const dueDate = getSafeDate(task.dueDate);
                     return (
                         task.category === "next_action" &&
                         !task.completed &&
-                        (!task.dueDate || isAfter(new Date(task.dueDate), todayStart))
+                        (!dueDate || isAfter(dueDate, todayStart) || isEqual(dueDate, todayStart)) // dueDate is not in the past
                     );
                 });
                 break;
-            case "due":
-                filtered = allUtilTasks.filter(task => {
-                    // 等同于任务统计中的已过期
+            case "due": // "到期任务" (Overdue based on your definition)
+                filtered = baseTasksForTab.filter(task => {
+                    const dueDate = getSafeDate(task.dueDate);
                     return (
                         task.category === "next_action" &&
                         !task.completed &&
-                        task.dueDate && 
-                        (isBefore(new Date(task.dueDate), todayStart) || isEqual(new Date(task.dueDate), todayStart))
+                        dueDate && 
+                        isBefore(dueDate, todayStart) // dueDate < todayStart
                     );
                 });
                 break;
             case "completedToday":
-                filtered = allUtilTasks.filter(task => {
-                    // 等同于任务统计中的已完成
+                filtered = baseTasksForTab.filter(task => {
                     const completedAt = getSafeDate(task.completedAt);
                     return (
+                        task.category === "next_action" &&
                         task.completed &&
                         completedAt && 
                         isWithinInterval(completedAt, { start: todayStart, end: todayEnd })
@@ -156,34 +238,34 @@ export function TodayFocusTasks({
                 });
                 break;
             case "recurring":
-                filtered = allUtilTasks.filter(task => {
-                    // 等同于任务统计中的重复任务
-                    return task.isRecurring && isRecurringTaskOccurringInRange(task, todayStart, todayEnd);
+                filtered = baseTasksForTab.filter(task => {
+                    return task.category === "next_action" && task.isRecurring; // Already filtered by isRecurringTaskOccurringToday in baseTasksForTab
                 });
                 break;
-            case "upcomingPlanned":
-                filtered = allUtilTasks.filter(task => {
+            // --- Tabs with logic not directly tied to the "strict today" definition from user ---
+            // These are kept as they were, as they look at "upcoming" or "due soon" relative to today.
+            // If these also need to strictly adhere to the "Today Filter" first, this part needs revisiting.
+            case "upcomingPlanned": // Tasks planned for tomorrow to 3 days later
+                 filtered = allUtilTasks.filter(task => { // Uses allUtilTasks directly
                     const plannedDate = getSafeDate(task.plannedDate);
                     return (
                         task.category === "next_action" &&
                         !task.completed &&
                         plannedDate && 
-                        compareAsc(plannedDate, tomorrowStart) >= 0 && // plannedDate >= tomorrow
-                        compareAsc(plannedDate, threeDaysLaterEnd) <= 0 // plannedDate <= threeDaysLater
+                        isAfter(plannedDate, todayEnd) && // plannedDate > todayEnd (i.e. from tomorrow)
+                        isBefore(plannedDate, threeDaysLaterEnd) // plannedDate < threeDaysLaterEnd
                     );
                 });
                 break;
-            case "dueSoon":
-                filtered = allUtilTasks.filter(task => {
-                    // 等同于进行中 + 即将到期条件
+            case "dueSoon": // Tasks due from tomorrow to 3 days later (and not completed, next_action)
+                filtered = allUtilTasks.filter(task => { // Uses allUtilTasks directly
                     const dueDate = getSafeDate(task.dueDate);
                     return (
                         task.category === "next_action" &&
                         !task.completed &&
-                        (!task.dueDate || isAfter(new Date(task.dueDate), todayStart)) && // 进行中条件
                         dueDate && 
-                        compareAsc(dueDate, tomorrowStart) >= 0 &&    // 截止日期 >= 明天
-                        compareAsc(dueDate, threeDaysLaterEnd) <= 0   // 截止日期 <= 三天后
+                        isAfter(dueDate, todayEnd) &&    // dueDate > todayEnd (i.e. from tomorrow)
+                        isBefore(dueDate, threeDaysLaterEnd)   // dueDate < threeDaysLaterEnd
                     );
                 });
                 break;
@@ -191,7 +273,6 @@ export function TodayFocusTasks({
                 return [];
         }
 
-        // 排序逻辑保持不变
         return filtered.sort((a, b) => {
             if (a.isFrog && !b.isFrog) return -1;
             if (!a.isFrog && b.isFrog) return 1;
@@ -212,7 +293,7 @@ export function TodayFocusTasks({
             }
             return 0;
         });
-    }, [allUtilTasks, activeTab, isLoading]);
+    }, [tasksFilteredForToday, activeTab, isLoading, allUtilTasks]); // allUtilTasks for upcoming/dueSoon
 
     const tabCounts = useMemo(() => {
         const counts: Record<TabValue, number> = {
@@ -227,13 +308,14 @@ export function TodayFocusTasks({
             return counts;
         }
 
-        const todayStart = startOfDay(new Date());
-        const todayEnd = endOfDay(new Date());
-        const tomorrowStart = startOfDay(addDays(new Date(), 1));
-        const threeDaysLaterEnd = endOfDay(addDays(new Date(), 3));
+        const today = new Date();
+        const todayStart = startOfDay(today);
+        const todayEnd = endOfDay(today);
+        const tomorrowStart = startOfDay(addDays(today, 1)); // for upcoming/dueSoon
+        const threeDaysLaterEnd = endOfDay(addDays(today, 3)); // for upcoming/dueSoon
 
-        allUtilTasks.forEach(task => {
-            const plannedDate = getSafeDate(task.plannedDate);
+        // Use tasksFilteredForToday for tabs that operate strictly within "today's tasks"
+        tasksFilteredForToday.forEach(task => {
             const dueDate = getSafeDate(task.dueDate);
             const completedAt = getSafeDate(task.completedAt);
 
@@ -241,17 +323,17 @@ export function TodayFocusTasks({
             if (
                 task.category === "next_action" &&
                 !task.completed &&
-                (plannedDate && compareAsc(plannedDate, todayEnd) <= 0) &&
-                (!dueDate || compareAsc(dueDate, todayEnd) > 0)
+                (!dueDate || isAfter(dueDate, todayStart) || isEqual(dueDate, todayStart))
             ) {
                 counts.inProgress++;
             }
 
-            // due
+            // due (Overdue)
             if (
                 task.category === "next_action" &&
                 !task.completed &&
-                (dueDate && compareAsc(dueDate, todayEnd) <= 0)
+                dueDate && 
+                isBefore(dueDate, todayStart)
             ) {
                 counts.due++;
             }
@@ -260,46 +342,54 @@ export function TodayFocusTasks({
             if (
                 task.category === "next_action" &&
                 task.completed &&
-                (completedAt && isToday(completedAt))
+                completedAt && isWithinInterval(completedAt, { start: todayStart, end: todayEnd })
             ) {
                 counts.completedToday++;
             }
 
             // recurring
-            if (task.isRecurring && isRecurringTaskOccurringInRange(task, todayStart, todayEnd)) {
+            if (task.category === "next_action" && task.isRecurring) { // Already filtered by isRecurringTaskOccurringToday
                 counts.recurring++;
             }
+        });
+        
+        // For upcomingPlanned and dueSoon, we iterate allUtilTasks as their logic is slightly different
+        allUtilTasks.forEach(task => {
+            const plannedDate = getSafeDate(task.plannedDate);
+            const dueDate = getSafeDate(task.dueDate);
 
-            // upcomingPlanned
+            // upcomingPlanned (original logic, not strictly based on tasksFilteredForToday)
             if (
                 task.category === "next_action" &&
                 !task.completed &&
                 plannedDate && 
-                compareAsc(plannedDate, tomorrowStart) >= 0 &&
-                compareAsc(plannedDate, threeDaysLaterEnd) <= 0
+                isAfter(plannedDate, todayEnd) &&
+                isBefore(plannedDate, threeDaysLaterEnd)
             ) {
                 counts.upcomingPlanned++;
             }
 
-            // dueSoon
+            // dueSoon (original logic, not strictly based on tasksFilteredForToday)
             if (
                 task.category === "next_action" &&
                 !task.completed &&
                 dueDate && 
-                compareAsc(dueDate, tomorrowStart) >= 0 &&
-                compareAsc(dueDate, threeDaysLaterEnd) <= 0 
+                isAfter(dueDate, todayEnd) &&
+                isBefore(dueDate, threeDaysLaterEnd) 
             ) {
                 counts.dueSoon++;
             }
         });
+
         return counts;
-    }, [allUtilTasks, isLoading]);
+    }, [tasksFilteredForToday, isLoading, allUtilTasks]); // allUtilTasks for upcoming/dueSoon counts
 
     // 添加处理删除确认的函数
     const handleDeleteConfirm = () => {
         if (taskToDelete) {
             onDeleteTask(taskToDelete.id);
             setTaskToDelete(null);
+            setIsDeleteConfirmOpen(false); // Close dialog after confirm
         }
     };
 
@@ -309,9 +399,8 @@ export function TodayFocusTasks({
     };
 
     const renderTabContent = (tabValue: TabValue) => {
-        const tasksForTab = memoizedFilteredTasks; // Use the memoized tasks for the current activeTab
+        const tasksForTab = memoizedFilteredTasks;
         
-        // 始终使用相同的容器结构，确保页签内容位置一致
         return (
             <div className="space-y-3 py-4 overflow-y-auto flex-grow pr-1">
                 {isLoading && tasksForTab.length === 0 ? (
@@ -341,10 +430,10 @@ export function TodayFocusTasks({
                             getProjectNameById={getProjectNameById}
                             onSelectTask={() => {}} 
                             onToggleComplete={() => { onToggleComplete(task.id); }}
-                            onEditTask={() => onEditTask(task)} // Assuming onEditTask might lead to data changes that need refresh
-                            onDeleteTask={() => handleTaskDeleteClick(task)} // 修改为打开确认对话框
+                            onEditTask={() => onEditTask(task)}
+                            onDeleteTask={() => handleTaskDeleteClick(task)} 
                             onToggleFrogStatus={() => { onToggleFrogStatus(task.id); }}
-                            onAddTaskToTimeline={(t) => onAddTaskToTimeline(t)} // t is already the full task object
+                            onAddTaskToTimeline={(t) => onAddTaskToTimeline(t)}
                             onPomodoroClick={() => onPomodoroClick(task.id, task.title)}
                         />
                     ))
@@ -398,48 +487,5 @@ export function TodayFocusTasks({
     );
 }
 
-// 判断重复任务是否在范围内有实例
-const isRecurringTaskOccurringInRange = (task: Task, checkRangeStart: Date, checkRangeEnd: Date): boolean => {
-    if (!task.isRecurring || !task.recurrenceRule || !task.plannedDate) return false;
-    
-    const dtstart = new Date(task.plannedDate);
-    let ruleOptions: Partial<RRuleOptions> = { dtstart };
-
-    try {
-        // 检查是否为JSON格式
-        if (typeof task.recurrenceRule === 'string' && task.recurrenceRule.startsWith('{')) {
-            const jsonRule = JSON.parse(task.recurrenceRule);
-            
-            // 从JSON创建RRule选项
-            if (jsonRule.frequency === 'daily') {
-                ruleOptions.freq = RRule.DAILY;
-            } else if (jsonRule.frequency === 'weekly') {
-                ruleOptions.freq = RRule.WEEKLY;
-            } else if (jsonRule.frequency === 'monthly') {
-                ruleOptions.freq = RRule.MONTHLY;
-            } else if (jsonRule.frequency === 'yearly') {
-                ruleOptions.freq = RRule.YEARLY;
-            }
-            
-            // 设置其他选项
-            if (jsonRule.endsType === 'on_date' && jsonRule.endDate) {
-                ruleOptions.until = new Date(jsonRule.endDate);
-            }
-            if (jsonRule.endsType === 'after_occurrences' && jsonRule.occurrences) {
-                ruleOptions.count = jsonRule.occurrences;
-            }
-        } else if (typeof task.recurrenceRule === 'string') {
-            // 尝试作为标准RRULE解析
-            const tempRule = RRule.fromString(task.recurrenceRule.startsWith('RRULE:') ? 
-                task.recurrenceRule : 'RRULE:' + task.recurrenceRule);
-            ruleOptions = {...tempRule.options, dtstart};
-        }
-        
-        const rule = new RRule(ruleOptions);
-        const occurrences = rule.between(startOfDay(checkRangeStart), endOfDay(checkRangeEnd), true);
-        return occurrences.length > 0;
-    } catch (e) {
-        console.error("Error creating RRule or getting occurrences:", e, task.recurrenceRule);
-        return false;
-    }
-}; 
+// The global isRecurringTaskOccurringInRange is removed as its logic is now integrated 
+// into isRecurringTaskOccurringToday or used directly where a generic range is needed (like in task-stats-updater) 

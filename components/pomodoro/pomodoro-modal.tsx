@@ -289,7 +289,14 @@ export function PomodoroModal({ initialTask }: PomodoroModalProps) {
     }
   }, [open, settings.workDuration, settings.shortBreakDuration, settings.longBreakDuration, settings.longBreakInterval, loadTasksForModal]);
   
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
+  // 用户交互事件统一处理
+  const handleUserInteract = useCallback(() => {
+    if (!hasUserInteracted) setHasUserInteracted(true);
+  }, [hasUserInteracted]);
+  
   const playSoundLogic = useCallback((soundType: 'start' | 'end') => {
+    if (!hasUserInteracted) return;
     if (isMuted || !settings.enableStartEndSounds) return;
     const soundRef = soundType === 'start' ? startSoundRef : endSoundRef;
     if (soundRef.current) {
@@ -300,7 +307,7 @@ export function PomodoroModal({ initialTask }: PomodoroModalProps) {
         }
       } catch (e) { console.warn(e) }
     }
-  }, [isMuted, settings.enableStartEndSounds]);
+  }, [isMuted, settings.enableStartEndSounds, hasUserInteracted]);
   
   // 死锁终极修复：mode或time变化时强制解锁
   useEffect(() => {
@@ -443,6 +450,7 @@ export function PomodoroModal({ initialTask }: PomodoroModalProps) {
   const isActionDisabled = loadingTasks || stateTransitionRef.current;
 
   const toggleTimer = () => {
+    handleUserInteract();
     const newIsActive = !isActive
     setIsActive(newIsActive)
     
@@ -466,6 +474,7 @@ export function PomodoroModal({ initialTask }: PomodoroModalProps) {
   }
 
   const resetTimerLogic = () => {
+    handleUserInteract();
     setIsActive(false)
     setTime(durations[mode])
     if (backgroundSoundRef.current) {
@@ -477,6 +486,7 @@ export function PomodoroModal({ initialTask }: PomodoroModalProps) {
   }
 
   const skipTimerLogic = () => {
+    handleUserInteract();
     playSoundLogic('end')
     handleTimerCompleteLogic()
   }

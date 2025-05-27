@@ -106,6 +106,13 @@ export function PomodoroCard() {
     longBreak: settings.longBreakDuration * 60,
   }
 
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
+
+  // 用户交互事件统一处理
+  const handleUserInteract = useCallback(() => {
+    if (!hasUserInteracted) setHasUserInteracted(true);
+  }, [hasUserInteracted]);
+
   // 初始化音效
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -141,6 +148,7 @@ export function PomodoroCard() {
 
   // 背景音播放控制
   useEffect(() => {
+    if (!hasUserInteracted) return;
     if (isActive && mode === "work" && settings.backgroundSound !== 'none' && backgroundSoundRef.current && !isMuted) {
       // 淡入
       backgroundSoundRef.current.volume = 0;
@@ -171,7 +179,7 @@ export function PomodoroCard() {
          backgroundSoundRef.current.pause();
       }
     }
-  }, [isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted]);
+  }, [isActive, mode, settings.backgroundSound, settings.alarmVolume, isMuted, hasUserInteracted]);
 
   const loadTasks = useCallback(async () => {
     setLoadingTasks(true);
@@ -193,13 +201,14 @@ export function PomodoroCard() {
   }, [loadTasks]);
 
   const playSound = useCallback((soundType: 'start' | 'end') => {
+    if (!hasUserInteracted) return;
     if (isMuted || !settings.enableStartEndSounds) return;
     const soundRef = soundType === 'start' ? startSoundRef : endSoundRef;
     if (soundRef.current) {
       soundRef.current.currentTime = 0;
       soundRef.current.play().catch(e => console.error(`Error playing ${soundType} sound on card:`, e));
     }
-  }, [isMuted, settings.enableStartEndSounds]); // startSoundRef and endSoundRef are stable
+  }, [isMuted, settings.enableStartEndSounds, hasUserInteracted]);
 
   useEffect(() => {
     if (isActive) {
@@ -320,6 +329,7 @@ export function PomodoroCard() {
   };
 
   const handleStartTimer = async () => {
+    handleUserInteract();
     let canStart = false;
     if (selectedTaskId === "new" && customTaskTitle.trim() !== "") {
       try {
@@ -363,6 +373,7 @@ export function PomodoroCard() {
   };
 
   const toggleTimer = () => {
+    handleUserInteract();
     if (isActive) {
       setIsActive(false);
       // Optional: Add fade out for background sound if timer is paused manually
@@ -384,6 +395,7 @@ export function PomodoroCard() {
   };
 
   const resetTimer = () => {
+    handleUserInteract();
     setIsActive(false);
     setTime(durations[mode]);
     if (backgroundSoundRef.current) {
@@ -393,6 +405,7 @@ export function PomodoroCard() {
   };
 
   const skipTimer = () => {
+    handleUserInteract();
     // For immediate skip, play end sound now (if enabled) then complete.
     playSound('end'); 
     handleTimerComplete(); 

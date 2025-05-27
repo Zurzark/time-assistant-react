@@ -4,13 +4,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useTaskStats } from "../task/task-stats-updater"
 import { Sigma, PlayCircle, CheckCircle2, AlertCircle, ArrowRightCircle, Repeat } from "lucide-react"
+import { useEffect, useState } from 'react';
 
 interface TaskStatsCardProps {
   // Props are no longer needed as context handles timeRange and its update.
 }
 
 export function TaskStatsCard({}: TaskStatsCardProps) {
-  const { stats, timeRange, setTimeRange, isLoading, error } = useTaskStats();
+  const { stats, timeRange, setTimeRange, isLoading, error, refreshStats } = useTaskStats();
+
+  // 强制本地刷新机制，确保统计卡片100%自动刷新
+  const [, setForceUpdate] = useState(0);
+  useEffect(() => {
+    const handler = () => {
+      setForceUpdate(v => v + 1);
+      refreshStats();
+    };
+    window.addEventListener('taskDataChangedForStats', handler);
+    return () => window.removeEventListener('taskDataChangedForStats', handler);
+  }, [refreshStats]);
 
   const handleTimeRangeChange = (value: string) => {
     setTimeRange(value as "today" | "week" | "month" | "all");
@@ -74,7 +86,7 @@ export function TaskStatsCard({}: TaskStatsCardProps) {
         </Select>
       </CardHeader>
       <CardContent className="pb-4 pt-2 space-y-2 sm:space-y-3">
-        {/* Row 1: Core Stats */}
+        {/* 第一排：总任务、下一步、重复 */}
         <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
           <StatItem 
             value={stats.total} 
@@ -82,35 +94,35 @@ export function TaskStatsCard({}: TaskStatsCardProps) {
             colorClassName="text-slate-700 dark:text-slate-300"
           />
           <StatItem 
+            value={stats.nextAction} 
+            label="下一步" 
+            colorClassName="text-sky-600 dark:text-sky-400"
+          />
+          <StatItem 
+            value={stats.recurring} 
+            label="重复" 
+            colorClassName="text-purple-600 dark:text-purple-400"
+          />
+        </div>
+        {/* 第二排：进行中、已完成、已过期 */}
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2 pt-1 sm:pt-2">
+          <StatItem 
             value={stats.inProgress} 
             label="进行中" 
             colorClassName="text-blue-600 dark:text-blue-400"
+            isSubStat
           />
           <StatItem 
             value={stats.completedInRange} 
             label="已完成" 
             colorClassName="text-green-600 dark:text-green-400"
-          />
-        </div>
-        {/* Row 2: Secondary Stats */}
-        <div className="grid grid-cols-3 gap-1.5 sm:gap-2 pt-1 sm:pt-2">
-          <StatItem 
-            value={stats.nextAction} 
-            label="下一步" 
-            isSubStat 
-            colorClassName="text-sky-600 dark:text-sky-400"
+            isSubStat
           />
           <StatItem 
             value={stats.overdue} 
             label="已过期" 
-            isSubStat 
             colorClassName="text-red-600 dark:text-red-400"
-          />
-          <StatItem 
-            value={stats.recurring} 
-            label="重复" 
-            isSubStat 
-            colorClassName="text-purple-600 dark:text-purple-400"
+            isSubStat
           />
         </div>
       </CardContent>
