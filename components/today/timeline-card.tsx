@@ -459,7 +459,19 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
     }
   };
 
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = async () => {
+    // Refresh data for the modal to ensure latest tasks and categories are available
+    try {
+      const [categories, dbTasks] = await Promise.all([
+        getAllDB<ActivityCategory>(ObjectStores.ACTIVITY_CATEGORIES),
+        getAllDB<Task>(ObjectStores.TASKS)
+      ]);
+      setActivityCategories(categories);
+      setTasks(dbTasks);
+    } catch (e) {
+      console.error("Failed to refresh data for modal:", e);
+    }
+
     const currentTodayForModal = getTodayDateString();
     const now = new Date();
     let suggestedStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0, 0);

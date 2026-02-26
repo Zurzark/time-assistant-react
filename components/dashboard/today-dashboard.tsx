@@ -12,11 +12,11 @@ import { TimelineCard } from "../today/timeline-card"
 import { UnifiedAddModal } from "../common/UnifiedAddModal"
 import { TodayFocusTasks } from "../today/TodayFocusTasks"
 import { Task as TaskUtilsTask } from "@/lib/task-utils"
-import * as db from "@/lib/db"; // 导入数据库操作
-import { toast } from "sonner"; // 导入 toast 用于提示
+import * as db from "@/lib/db"
+import { toast } from "sonner"
 
 // Import useTaskData and SelectTimeRangeModal
-import { useTaskData } from "@/components/task/tasks-view/hooks/useTaskData";
+import { useTaskData } from "@/components/task/tasks-view/hooks/useTaskData"
 import { SelectTimeRangeModal } from "@/components/task/SelectTimeRangeModal";
 import { usePomodoroController } from "@/components/pomodoro/pomodoro-context"
 
@@ -25,6 +25,20 @@ export function TodayDashboard() {
   const [isUnifiedAddModalOpen, setIsUnifiedAddModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<TaskUtilsTask | null>(null)
   const [todayFocusRefreshKey, setTodayFocusRefreshKey] = useState(0)
+  const [projects, setProjects] = useState<db.Project[]>([])
+
+  // Fetch projects on mount
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        const allProjects = await db.getAll<db.Project>(db.ObjectStores.PROJECTS)
+        setProjects(allProjects)
+      } catch (error) {
+        console.error("Failed to fetch projects:", error)
+      }
+    }
+    fetchProjects()
+  }, [])
 
   // Use useTaskData for timeline functionality
   const {
@@ -86,9 +100,9 @@ export function TodayDashboard() {
   };
 
   const getProjectNameById = (projectId: number | string | undefined): string => {
-    if (projectId === 1) return "项目A"
-    if (projectId === "proj2") return "项目B"
-    return "未知项目"
+    if (!projectId) return "未知项目"
+    const project = projects.find(p => p.id === projectId)
+    return project ? project.name : "未知项目"
   }
 
   const onEditTask = (task: TaskUtilsTask) => {
