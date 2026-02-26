@@ -310,11 +310,10 @@ export function TaskItem({
                                         {format(task.dueDate, 'yyyy/MM/dd')} (截止)
                                         {isOverdue && <AlertTriangle className="h-3.5 w-3.5 ml-1 text-red-500" />}
                                         
-                                        {isToday(new Date(task.dueDate)) && !task.completed && !isOverdue && <Badge variant="outline" className="ml-1.5 !text-xs border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-300 px-1 py-0">今日到期</Badge>}
                                     </span>
                                 )}
                                 {task.projectId && (
-                                    <Badge variant="outline" className="text-xs px-2 py-0.5 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
+                                    <Badge variant="outline" className="text-xs px-2 py-0.5 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
                                         <FolderOpen className="h-3 w-3 mr-1 opacity-70" />
                                         {getProjectNameById(task.projectId)}
                                     </Badge>
@@ -467,7 +466,7 @@ export function TaskItem({
                                 </Badge>
                             )}
                              {task.projectId && (
-                                <Badge variant="outline" className="text-xs px-1.5 py-0.5 border-gray-300 dark:border-gray-600">
+                                <Badge variant="outline" className="text-xs px-1.5 py-0.5 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
                                     <FolderOpen className="h-3 w-3 mr-1 opacity-60"/>
                                     {getProjectNameById(task.projectId)?.substring(0,10) + (getProjectNameById(task.projectId)?.length > 10 ? '...' : '')}
                                 </Badge>

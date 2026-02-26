@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Plus, CheckSquare, Info } from 'lucide-react';
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"; // 导入确认对话框组件
 import { RRule, Options as RRuleOptions } from 'rrule';
+import { BatchOperationsBar } from "@/components/task/batch-operations-bar";
 
 interface TodayFocusTasksProps {
     getProjectNameById: (projectId: number | string | undefined) => string;
@@ -79,6 +80,7 @@ export function TodayFocusTasks({
     // 添加删除确认对话框状态
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+    const [selectedTaskIds, setSelectedTaskIds] = useState<number[]>([]);
 
     const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -399,11 +401,36 @@ export function TodayFocusTasks({
         setIsDeleteConfirmOpen(true);
     };
 
+    const handleSelectTask = (taskId: number, checked: boolean) => {
+        setSelectedTaskIds(prev => {
+            if (checked) {
+                return [...prev, taskId];
+            } else {
+                return prev.filter(id => id !== taskId);
+            }
+        });
+    };
+
+    const handleClearSelection = () => {
+        setSelectedTaskIds([]);
+    };
+
+    const handleOperationComplete = () => {
+        setRefreshTrigger(prev => prev + 1);
+        window.dispatchEvent(new CustomEvent('taskDataChangedForStats'));
+    };
+
     const renderTabContent = (tabValue: TabValue) => {
         const tasksForTab = memoizedFilteredTasks;
         
         return (
             <div className="space-y-3 py-4 overflow-y-auto flex-grow pr-1">
+                <BatchOperationsBar 
+                    selectedTaskIds={selectedTaskIds}
+                    onClearSelection={handleClearSelection}
+                    onOperationComplete={handleOperationComplete}
+                    className="z-10"
+                />
                 {isLoading && tasksForTab.length === 0 ? (
                     <div className="flex items-center justify-center h-full">
                         <p className="text-muted-foreground">加载中...</p>
@@ -426,11 +453,11 @@ export function TodayFocusTasks({
                         <TaskItem
                             key={task.id}
                             task={task} 
-                            isSelected={false} 
+                            isSelected={selectedTaskIds.includes(task.id!)} 
                             viewMode="list"
                             getProjectNameById={getProjectNameById}
-                            onSelectTask={() => {}} 
-                            onToggleComplete={() => { onToggleComplete(task.id); }}
+                            onSelectTask={handleSelectTask} 
+                            onToggleComplete={() => { onToggleComplete(task.id!); }}
                             onEditTask={() => onEditTask(task)}
                             onDeleteTask={() => handleTaskDeleteClick(task)} 
                             onToggleFrogStatus={() => { onToggleFrogStatus(task.id); }}
