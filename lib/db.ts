@@ -1,7 +1,7 @@
 // IndexedDB 数据库实现
 // 定义数据库名称和版本号
 const DB_NAME = 'FocusPilotDB';
-const DB_VERSION = 8;
+const DB_VERSION = 11;
 
 // 定义对象存储名称
 export enum ObjectStores {
@@ -20,6 +20,8 @@ export enum ObjectStores {
   FIXED_BREAK_RULES = 'fixedBreakRules',
   ACTIVITY_CATEGORIES = 'activityCategories',
   INBOX_ITEMS = 'inboxItems',
+  LLM_USAGE_LOGS = 'llmUsageLogs',
+  LLM_USAGE_STATS = 'llmUsageStats',
 }
 
 // 定义打开数据库的接口
@@ -331,6 +333,56 @@ export const openDB = (): Promise<IDBResult> => {
             inboxItemsStore.createIndex('byRelatedGoalId', 'relatedGoalId', { unique: false });
             
             console.log('创建收集篮条目存储及其索引');
+          }
+        }
+        // 版本 9: 添加 LLM_USAGE_LOGS 对象存储
+        if (oldVersion < 9) {
+          console.log(`数据库从版本 ${oldVersion} 升级到版本 9: 添加 LLM_USAGE_LOGS 对象存储`);
+          
+          if (!db.objectStoreNames.contains(ObjectStores.LLM_USAGE_LOGS)) {
+            const llmLogsStore = db.createObjectStore(ObjectStores.LLM_USAGE_LOGS, { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            
+            // 创建索引
+            llmLogsStore.createIndex('byCreatedAt', 'createdAt', { unique: false });
+            llmLogsStore.createIndex('byModel', 'model', { unique: false });
+            
+            console.log('创建 LLM 调用记录存储及其索引');
+          }
+        }
+        // 版本 10: 添加 LLM_USAGE_STATS 对象存储
+        if (oldVersion < 10) {
+          console.log(`数据库从版本 ${oldVersion} 升级到版本 10: 添加 LLM_USAGE_STATS 对象存储`);
+          
+          if (!db.objectStoreNames.contains(ObjectStores.LLM_USAGE_STATS)) {
+            const llmStatsStore = db.createObjectStore(ObjectStores.LLM_USAGE_STATS, { 
+              keyPath: 'id' // 'global'
+            });
+            console.log('创建 LLM 调用统计存储');
+          }
+        }
+        // 版本 11: 确保 LLM_USAGE_STATS 和 LLM_USAGE_LOGS 对象存储存在 (修复升级失败问题)
+        if (oldVersion < 11) {
+          console.log(`数据库从版本 ${oldVersion} 升级到版本 11: 检查并创建 LLM 相关存储`);
+          
+          if (!db.objectStoreNames.contains(ObjectStores.LLM_USAGE_LOGS)) {
+            const llmLogsStore = db.createObjectStore(ObjectStores.LLM_USAGE_LOGS, { 
+              keyPath: 'id', 
+              autoIncrement: true 
+            });
+            // 创建索引
+            llmLogsStore.createIndex('byCreatedAt', 'createdAt', { unique: false });
+            llmLogsStore.createIndex('byModel', 'model', { unique: false });
+            console.log('创建 LLM 调用记录存储及其索引 (v11 fix)');
+          }
+
+          if (!db.objectStoreNames.contains(ObjectStores.LLM_USAGE_STATS)) {
+            const llmStatsStore = db.createObjectStore(ObjectStores.LLM_USAGE_STATS, { 
+              keyPath: 'id' // 'global'
+            });
+            console.log('创建 LLM 调用统计存储 (v11 fix)');
           }
         }
       };
@@ -977,6 +1029,29 @@ export interface InboxItem {
   status: 'unprocessed' | 'processed_to_task' | 'processed_to_goal' | 'someday_maybe' | 'archived' | 'deleted'; // 状态
   relatedTaskId?: number; // 关联的任务ID（如果已转化为任务）
   relatedGoalId?: number; // 关联的目标ID（如果已转化为目标）
+}
+
+// LLM 调用记录接口
+export interface LLMUsageLog {
+  id?: number;
+  model: string;
+  provider: string;
+  tokens: {
+    prompt: number;
+    completion: number;
+    total: number;
+  };
+  cost: number; // 人民币
+  duration: number; // 毫秒
+  createdAt: Date;
+}
+
+// LLM 调用统计接口
+export interface LLMUsageStats {
+  id: string; // 'global'
+  totalCost: number;
+  totalCount: number;
+  updatedAt: Date;
 }
 
 // 获取所有未处理的收集篮条目

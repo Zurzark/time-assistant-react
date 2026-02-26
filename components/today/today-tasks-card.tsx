@@ -93,6 +93,17 @@ export function TodayTasksCard({ onPomodoroClick, onViewAllClick, onAddTaskClick
     loadTodayTasks()
   }, [loadTodayTasks])
 
+  // Listen for task updates
+  useEffect(() => {
+    const handleTaskUpdate = () => {
+      loadTodayTasks()
+    }
+    window.addEventListener('taskDataChangedForStats', handleTaskUpdate)
+    return () => {
+      window.removeEventListener('taskDataChangedForStats', handleTaskUpdate)
+    }
+  }, [loadTodayTasks])
+
   const handleCheckboxChange = async (taskId: number) => {
     const originalTasks = [...tasks]
     const taskIndex = tasks.findIndex(t => t.id === taskId)

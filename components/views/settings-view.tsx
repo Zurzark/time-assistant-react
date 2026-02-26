@@ -65,6 +65,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { ActivityCategorySettings } from "./settings/activity-category-settings";
 import { DataManagementSettings } from "./settings/data-management-settings";
 import { TagManagementSettings } from "./settings/tag-management-settings";
+import { AISettingsPanel } from "./settings/ai-settings";
+import { AIUsageLogs } from "./settings/ai-usage-logs";
 
 // 新增：引入番茄钟设置面板
 import { PomodoroSettingsPanel } from "../settings/pomodoro-settings-panel";
@@ -509,6 +511,14 @@ export function SettingsView() {
                   AI助手配置
                 </Button>
                 <Button
+                  variant={activeTab === "ai-logs" ? "secondary" : "ghost"}
+                  className="w-full justify-start"
+                  onClick={() => setActiveTab("ai-logs")}
+                >
+                  <ListChecks className="h-4 w-4 mr-2" />
+                  AI调用记录
+                </Button>
+                <Button
                   variant={activeTab === "data" ? "secondary" : "ghost"}
                   className="w-full justify-start"
                   onClick={() => setActiveTab("data")}
@@ -556,6 +566,7 @@ export function SettingsView() {
                 {activeTab === "notifications" && "通知设置"}
                 {activeTab === "worktime" && "工作时间段"}
                 {activeTab === "ai" && "AI助手配置"}
+                {activeTab === "ai-logs" && "AI调用记录"}
                 {activeTab === "data" && "数据管理"}
                 {activeTab === "tags" && "标签管理"}
                 {activeTab === "activityCategories" && "活动分类管理"}
@@ -568,6 +579,7 @@ export function SettingsView() {
                 {activeTab === "notifications" && "设置何时以及如何接收通知"}
                 {activeTab === "worktime" && "定义您的工作时间和工作日"}
                 {activeTab === "ai" && "配置AI助手的行为和权限"}
+                {activeTab === "ai-logs" && "查看 AI 接口的调用记录和费用统计"}
                 {activeTab === "data" && "导入、导出和管理您的数据"}
                 {activeTab === "tags" && "创建和管理任务标签"}
                 {activeTab === "activityCategories" && "创建和管理您的时间日志和时间块的活动分类"}
@@ -1042,34 +1054,12 @@ export function SettingsView() {
 
               {/* AI Settings */}
               {activeTab === "ai" && (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">AI助手行为</h3>
-                    <div className="grid gap-2">
-                      <Label htmlFor="ai-assistant-enabled">启用AI助手</Label>
-                      <Switch id="ai-assistant-enabled" checked={true} onCheckedChange={() => {}} />
-                    </div>
-                  </div>
+                <AISettingsPanel />
+              )}
 
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium">AI权限设置</h3>
-                    <div className="grid gap-2">
-                      <Label htmlFor="ai-access-level">访问级别</Label>
-                      <Select defaultValue="basic">
-                        <SelectTrigger id="ai-access-level">
-                          <SelectValue placeholder="选择访问级别" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="basic">基本</SelectItem>
-                          <SelectItem value="advanced">高级</SelectItem>
-                          <SelectItem value="full">完全</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
+              {/* AI Logs */}
+              {activeTab === "ai-logs" && (
+                <AIUsageLogs />
               )}
 
               {/* Data Management */}

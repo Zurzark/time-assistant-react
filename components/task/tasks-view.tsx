@@ -43,6 +43,7 @@ export function TasksView() {
     tasks, // Live tasks for general view
     projectList,
     tagList,
+    activityCategories,
     deletedTasks, // For trash view
     loadingData, // General loading for tasks, projects, tags
     errorData, // General error for tasks, projects, tags
@@ -252,7 +253,7 @@ export function TasksView() {
               <TaskFormFields
                 key={createTaskFormKey}
                 availableProjects={projectList}
-                availableActivityCategories={[]} // TODO: (ActivityCategories) 此处应为从 useTaskData 获取的 activityCategories。目前暂时使用空数组以解决类型错误。
+                availableActivityCategories={activityCategories}
                 onSave={handleActualCreateTask}
                 onCancel={() => {
                   setIsCreateDialogOpen(false);
@@ -356,7 +357,7 @@ export function TasksView() {
         onSave={handleActualUpdateTask}
         availableProjects={projectList}
         onCreateNewProject={handleCreateNewProject} // from useTaskData
-        availableActivityCategories={[]}
+        availableActivityCategories={activityCategories}
       />
 
       <ConfirmationDialog

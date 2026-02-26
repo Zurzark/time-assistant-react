@@ -40,6 +40,16 @@ export function TodayDashboard() {
     fetchProjects()
   }, [])
 
+  useEffect(() => {
+    const handleTaskUpdate = () => {
+        triggerTodayFocusRefresh()
+    }
+    window.addEventListener('taskDataChangedForStats', handleTaskUpdate)
+    return () => {
+        window.removeEventListener('taskDataChangedForStats', handleTaskUpdate)
+    }
+  }, [])
+  
   // Use useTaskData for timeline functionality
   const {
     handleAddTaskToTimeline: openTimeSelectModal, // Rename for clarity in this context

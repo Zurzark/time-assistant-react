@@ -13,6 +13,7 @@ import {
     Project as DBProjectType,
     Tag as DBTagType,
     TimeBlock as DBTimeBlockType,
+    ActivityCategory,
 } from "@/lib/db";
 import {
     Task,
@@ -40,6 +41,7 @@ export function useTaskData() {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [projectList, setProjectList] = useState<DBProjectType[]>([]);
     const [tagList, setTagList] = useState<DBTagType[]>([]);
+    const [activityCategories, setActivityCategories] = useState<ActivityCategory[]>([]);
     const [deletedTasks, setDeletedTasks] = useState<DBTaskType[]>([]);
 
     const [loadingData, setLoadingData] = useState<boolean>(true); // Combined loading state
@@ -108,6 +110,15 @@ export function useTaskData() {
         }
     }, []);
 
+    const loadActivityCategories = useCallback(async () => {
+        try {
+            const dbCategories = await getAll<ActivityCategory>(ObjectStores.ACTIVITY_CATEGORIES);
+            setActivityCategories(dbCategories);
+        } catch (err) {
+            console.error("Failed to load activity categories:", err);
+        }
+    }, []);
+
     const loadDeletedTasks = useCallback(async () => {
         setLoadingTrash(true);
         setTrashError(null);
@@ -132,7 +143,8 @@ export function useTaskData() {
         loadTasks();
         loadProjects();
         loadTags();
-    }, [loadTasks, loadProjects, loadTags]);
+        loadActivityCategories();
+    }, [loadTasks, loadProjects, loadTags, loadActivityCategories]);
 
 
     const getProjectNameById = useCallback((projectId: number | string | undefined): string => {
@@ -566,12 +578,14 @@ export function useTaskData() {
         tasks,
         projectList,
         tagList,
+        activityCategories,
         deletedTasks,
         loadingData,
         errorData,
         loadTasks, // Expose if manual refresh is needed from UI
         loadProjects, // Expose if manual refresh is needed
         loadTags, // Expose if manual refresh is needed
+        loadActivityCategories,
         loadDeletedTasks,
         loadingTrash,
         trashError,
