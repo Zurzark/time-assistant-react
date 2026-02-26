@@ -9,6 +9,7 @@ import DatabaseInitializer from "@/components/common/database-initializer"
 import { Toaster } from "@/components/ui/sonner"
 import { StagewiseToolbar } from '@stagewise/toolbar-next';
 import { PomodoroProvider } from "@/components/pomodoro/pomodoro-context"
+import { UserProvider } from "@/components/common/user-provider"
 import PomodoroModal from "@/components/pomodoro/pomodoro-modal"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -36,8 +37,10 @@ export default function RootLayout({
           <DatabaseInitializer />
           <Toaster />
           <PomodoroProvider>
-            <PomodoroModal initialTask={null} />
-            {children}
+            <UserProvider>
+              <PomodoroModal initialTask={null} />
+              {children}
+            </UserProvider>
           </PomodoroProvider>
         </ThemeProvider>
       </body>

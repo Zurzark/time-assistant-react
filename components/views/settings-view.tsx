@@ -60,6 +60,8 @@ import {
 } from "@/components/ui/dialog"
 // import { IconPicker, PickableIconName } from '@/components/ui/icon-picker'; // Moved to ActivityCategorySettings
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { useUser } from "@/components/common/user-provider"
+import { processAvatarFile } from "@/lib/user-service"
 
 // ActivityCategorySettings component will be imported below
 import { ActivityCategorySettings } from "./settings/activity-category-settings";
@@ -176,6 +178,37 @@ export function SettingsView() {
   const [workStartTime, setWorkStartTime] = useState<{ hour: number; minute: number }>({ hour: 9, minute: 0 })
   const [workEndTime, setWorkEndTime] = useState<{ hour: number; minute: number }>({ hour: 18, minute: 0 })
   const { toast } = useToast(); 
+
+  const { user, updateUser } = useUser()
+  const [nickname, setNickname] = useState(user.nickname)
+  const [email, setEmail] = useState(user.email)
+  
+  useEffect(() => {
+    setNickname(user.nickname)
+    setEmail(user.email)
+  }, [user])
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      try {
+        const base64 = await processAvatarFile(e.target.files[0])
+        await updateUser({ avatar: base64 })
+        toast({ title: "头像已更新" })
+      } catch (error) {
+        console.error("Failed to update avatar:", error)
+        toast({ title: "头像更新失败", variant: "destructive" })
+      }
+    }
+  }
+
+  const handleSaveProfile = async () => {
+    const success = await updateUser({ nickname, email })
+    if (success) {
+      toast({ title: "个人信息已更新" })
+    } else {
+      toast({ title: "更新失败", variant: "destructive" })
+    }
+  }
 
   const [fixedBreakRules, setFixedBreakRules] = useState<FixedBreakRule[]>([]);
   const [loadingFixedBreakRules, setLoadingFixedBreakRules] = useState(true);
@@ -593,19 +626,41 @@ export function SettingsView() {
                   <div className="flex flex-col md:flex-row gap-6 items-start">
                     <div className="flex flex-col items-center space-y-2">
                       <Avatar className="h-24 w-24">
-                        <AvatarImage src="/placeholder.svg?height=96&width=96" alt="用户头像" />
-                        <AvatarFallback>用户</AvatarFallback>
+                        <AvatarImage src={user.avatar || "/placeholder.svg?height=96&width=96"} alt={user.nickname} />
+                        <AvatarFallback>{user.nickname?.charAt(0) || 'U'}</AvatarFallback>
                       </Avatar>
-                      <Button size="sm">更换头像</Button>
+                      <div className="relative">
+                        <Button size="sm" variant="outline" className="relative cursor-pointer">
+                          更换头像
+                          <input
+                            type="file"
+                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            accept="image/*"
+                            onChange={handleAvatarChange}
+                          />
+                        </Button>
+                      </div>
                     </div>
                     <div className="flex-1 space-y-4">
                       <div className="grid gap-2">
                         <Label htmlFor="name">昵称</Label>
-                        <Input id="name" defaultValue="张三" />
+                        <Input 
+                          id="name" 
+                          value={nickname} 
+                          onChange={(e) => setNickname(e.target.value)} 
+                        />
                       </div>
                       <div className="grid gap-2">
                         <Label htmlFor="email">邮箱</Label>
-                        <Input id="email" type="email" defaultValue="zhangsan@example.com" />
+                        <Input 
+                          id="email" 
+                          type="email" 
+                          value={email} 
+                          onChange={(e) => setEmail(e.target.value)} 
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        <Button onClick={handleSaveProfile}>保存更改</Button>
                       </div>
                     </div>
                   </div>

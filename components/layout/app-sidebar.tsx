@@ -19,11 +19,13 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { useUser } from "@/components/common/user-provider"
 
 export function AppSidebar() {
   const pathname = usePathname()
   const { open, setOpen } = useSidebar()
   const [showExpandButton, setShowExpandButton] = useState(false)
+  const { user } = useUser()
 
   const isActive = (path: string) => {
     return pathname === path
@@ -111,11 +113,11 @@ export function AppSidebar() {
         <SidebarFooter className="border-t p-4">
           <div className="flex items-center gap-2">
             <Avatar className="h-9 w-9">
-              <AvatarImage src="/placeholder.svg?height=36&width=36" alt="用户头像" />
-              <AvatarFallback>用户</AvatarFallback>
+              <AvatarImage src={user.avatar || "/placeholder.svg?height=36&width=36"} alt={user.nickname} />
+              <AvatarFallback>{user.nickname?.charAt(0) || 'U'}</AvatarFallback>
             </Avatar>
             <div className="flex flex-col">
-              <span className="text-sm font-medium">张三</span>
+              <span className="text-sm font-medium">{user.nickname}</span>
               <span className="text-xs text-muted-foreground">高级用户</span>
             </div>
           </div>
