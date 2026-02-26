@@ -5,6 +5,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TaskItem } from "@/components/task/tasks-view/TaskItem";
 import { Task, TaskPriority as TaskUtilsPriority, TaskCategory as UtilsTaskCategory, fromDBTaskShape } from "@/lib/task-utils";
 import * as db from "@/lib/db"; // Assuming db.Task and db.getAll etc.
@@ -25,7 +26,7 @@ import {
     isWithinInterval
 } from 'date-fns';
 import { Button } from '@/components/ui/button';
-import { Plus, CheckSquare } from 'lucide-react';
+import { Plus, CheckSquare, Info } from 'lucide-react';
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"; // 导入确认对话框组件
 import { RRule, Options as RRuleOptions } from 'rrule';
 
@@ -444,8 +445,29 @@ export function TodayFocusTasks({
 
     return (
         <Card className="flex flex-col shadow-md h-full">
-            <CardHeader className="pb-2 pt-4 px-4">
+            <CardHeader className="pb-2 pt-4 px-4 flex flex-row items-center space-x-2">
                 <CardTitle className="text-lg font-semibold">今日任务</CardTitle>
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-pointer hover:text-primary transition-colors" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[320px] text-xs space-y-2 p-3" side="right">
+                            <div className="font-semibold border-b pb-1 mb-1">今日任务筛选逻辑</div>
+                            <div className="space-y-1">
+                                <p><span className="font-medium text-primary">进行中:</span> 未完成 + (无截止日期 或 截止日期&ge;今天)</p>
+                                <p><span className="font-medium text-red-600">到期任务:</span> 未完成 + 已逾期(截止日期&lt;今天)</p>
+                                <p><span className="font-medium text-green-600">已完成:</span> 已完成 + 完成日期是今天</p>
+                                <p><span className="font-medium text-purple-600">重复任务:</span> 今天有重复实例的任务</p>
+                                <p><span className="font-medium text-orange-500">即将开始:</span> 未完成 + 计划日期在明天~3天后</p>
+                                <p><span className="font-medium text-yellow-600">即将到期:</span> 未完成 + 截止日期在明天~3天后</p>
+                                <div className="text-[10px] text-muted-foreground pt-1 border-t mt-1">
+                                    * 仅显示“下一步行动”类别的任务
+                                </div>
+                            </div>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
             </CardHeader>
             {/* Ensure CardContent takes up remaining space and allows Tabs to fill it */}
             <CardContent className="flex-grow flex flex-col p-2 sm:p-3 md:p-4 !pt-0">

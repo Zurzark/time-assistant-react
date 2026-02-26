@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Archive, ArrowRight, Clock, Flag, MoreHorizontal, Plus, Target, Trash2, Inbox } from "lucide-react"
+import { Archive, ArrowRight, Clock, Flag, MoreHorizontal, Plus, Target, Trash2, Inbox, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -15,6 +15,7 @@ import { AddInboxItemDialog } from "@/components/inbox/add-inbox-item-dialog"
 import { ConvertToTaskDialog } from "@/components/inbox/convert-to-task-dialog"
 import { ConvertToGoalDialog } from "@/components/inbox/convert-to-goal-dialog"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { AIAnalysisModal } from "@/components/ai-features/ai-analysis-modal"
 import { toast } from "sonner"
 
 export function InboxView() {
@@ -31,6 +32,7 @@ export function InboxView() {
   const [convertToGoalDialogOpen, setConvertToGoalDialogOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false)
 
   // 获取选中的条目
   const getSelectedInboxItems = () => {
@@ -92,6 +94,17 @@ export function InboxView() {
       // 否则全选
       setSelectedItems(new Set(filteredItems.map(item => item.id!)))
     }
+  }
+
+  // 处理AI解析
+  const handleAIAnalyze = () => {
+      if (selectedItems.size === 0) return
+      setIsAIModalOpen(true)
+  }
+
+  const handleAnalysisSuccess = () => {
+      setSelectedItems(new Set())
+      loadInboxItems()
   }
 
   // 快速添加条目
@@ -286,6 +299,10 @@ export function InboxView() {
                   <span className="text-sm font-medium">已选择 {selectedItems.size} 项</span>
                 </div>
                 <div className="flex items-center space-x-2">
+                  <Button variant="outline" size="sm" onClick={handleAIAnalyze}>
+                    <Zap className="h-4 w-4 mr-1 text-yellow-500 fill-yellow-500" />
+                    AI解析
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setDeleteConfirmOpen(true)}>
                     <Trash2 className="h-4 w-4 mr-1" />
                     删除
@@ -528,6 +545,14 @@ export function InboxView() {
         cancelLabel="取消"
         onConfirm={clearInbox}
         variant="destructive"
+      />
+
+      {/* AI解析对话框 */}
+      <AIAnalysisModal 
+        open={isAIModalOpen}
+        onOpenChange={setIsAIModalOpen}
+        inboxItems={getSelectedInboxItems()}
+        onSuccess={handleAnalysisSuccess}
       />
     </div>
   )

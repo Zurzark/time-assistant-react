@@ -2,8 +2,9 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTaskStats } from "../task/task-stats-updater"
-import { Sigma, PlayCircle, CheckCircle2, AlertCircle, ArrowRightCircle, Repeat } from "lucide-react"
+import { Sigma, PlayCircle, CheckCircle2, AlertCircle, ArrowRightCircle, Repeat, Info } from "lucide-react"
 import { useEffect, useState } from 'react';
 
 interface TaskStatsCardProps {
@@ -72,7 +73,30 @@ export function TaskStatsCard({}: TaskStatsCardProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2 space-x-2">
-        <CardTitle className="text-md font-medium whitespace-nowrap">任务统计</CardTitle>
+        <div className="flex items-center space-x-2">
+          <CardTitle className="text-md font-medium whitespace-nowrap">任务统计</CardTitle>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="h-4 w-4 text-muted-foreground cursor-pointer hover:text-primary transition-colors" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[300px] text-xs space-y-2 p-3" side="right">
+                <div className="font-semibold border-b pb-1 mb-1">统计口径说明</div>
+                <div className="space-y-1">
+                  <p><span className="font-medium text-primary">总任务:</span> 选定时间范围内的所有非删除任务</p>
+                  <p><span className="font-medium text-sky-600">下一步:</span> 总任务中类别为"下一步行动"的任务</p>
+                  <p><span className="font-medium text-purple-600">重复:</span> 范围内有实例的重复任务</p>
+                  <p><span className="font-medium text-blue-600">进行中:</span> 下一步行动 + 未完成 + 未过期(截止日期&ge;今天)</p>
+                  <p><span className="font-medium text-green-600">已完成:</span> 下一步行动 + 已完成 + 完成时间在范围内</p>
+                  <p><span className="font-medium text-red-600">已过期:</span> 下一步行动 + 未完成 + 已过期(截止日期&lt;今天)</p>
+                  <div className="text-[10px] text-muted-foreground pt-1 border-t mt-1">
+                    * 支持切换：今日、本周、本月、全部
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
         <Select value={timeRange} onValueChange={handleTimeRangeChange}>
           <SelectTrigger className="w-[120px] h-8 text-xs">
             <SelectValue placeholder="时间范围" />
