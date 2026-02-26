@@ -15,7 +15,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import React from "react"
 import { usePomodoroGlobal } from "./pomodoro-context"
 
-// 全局番茄钟弹窗组件，配合PomodoroContext实现全局唯一、状态持久化和页面切换不丢失，支持最小化、任务选择、音效、关闭确认等功能。
+// 全局番茄钟弹窗及右下角最小化悬浮窗组件，支持任务选择、音效、最小化、关闭确认等功能，配合PomodoroContext实现全局唯一和状态持久化。
 
 // --- 从 pomodoro-card.tsx 借鉴或重新定义的 SVG Icon Components ---
 // Play Icon
@@ -553,7 +553,7 @@ export function PomodoroModal({ initialTask }: PomodoroModalProps) {
       />
       {/* 最小化时只显示悬浮窗 */}
       {isMinimized && (
-        <MiniPomodoroWidget />
+        <MiniPomodoroWidget setShowCloseConfirm={setShowCloseConfirm} />
       )}
       {/* 只有未最小化时才显示 Dialog */}
       <Dialog open={open && !isMinimized} onOpenChange={(isOpen) => {
@@ -745,7 +745,7 @@ export function PomodoroModal({ initialTask }: PomodoroModalProps) {
 }
 
 // 右下角悬浮窗组件
-const MiniPomodoroWidget: React.FC = () => {
+const MiniPomodoroWidget: React.FC<{ setShowCloseConfirm: (b: boolean) => void }> = ({ setShowCloseConfirm }) => {
   const { time, mode, isActive, setIsActive, isMinimized, setIsMinimized, selectedTaskId } = usePomodoroGlobal();
   // 任务名
   const [dbTasks, setDbTasks] = React.useState<DBTask[]>([]);
@@ -789,6 +789,15 @@ const MiniPomodoroWidget: React.FC = () => {
         height: '120px', // 用户已调整
       }}
     >
+      {/* 右上角关闭按钮 */}
+      <button
+        className="absolute right-3 top-3 p-1 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+        title="关闭"
+        onClick={() => setShowCloseConfirm(true)}
+        style={{ zIndex: 10 }}
+      >
+        <X className="h-5 w-5 text-slate-500 dark:text-slate-300" />
+      </button>
       <div className="flex flex-col justify-center">
         <span className="font-semibold text-4xl text-slate-800 dark:text-slate-100">
           {formatTime(time)}
