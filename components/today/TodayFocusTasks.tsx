@@ -40,7 +40,8 @@ interface TodayFocusTasksProps {
     onAddTaskToTimeline: (task: Task) => void;
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
     onOpenUnifiedAddModalForNewTask: () => void;
-    projects: { id: number; name: string }[];
+    projects: { id?: number; name: string }[];
+    activityCategories?: { id?: number; name: string; color?: string; icon?: string }[];
     onUpdateTask: (task: Task) => void;
 }
 
@@ -75,6 +76,7 @@ export function TodayFocusTasks({
     onPomodoroClick,
     onOpenUnifiedAddModalForNewTask,
     projects,
+    activityCategories,
     onUpdateTask,
 }: TodayFocusTasksProps) {
     const [activeTab, setActiveTab] = useState<TabValue>("inProgress");
@@ -468,6 +470,7 @@ export function TodayFocusTasks({
                             onAddTaskToTimeline={(t) => onAddTaskToTimeline(t)}
                             onPomodoroClick={() => onPomodoroClick(task.id!, task.title)}
                             projects={projects}
+                            activityCategories={activityCategories}
                             onUpdateTask={onUpdateTask}
                         />
                     ))

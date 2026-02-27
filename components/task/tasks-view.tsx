@@ -347,6 +347,7 @@ export function TasksView() {
               onOpenCreateDialog={openCreateDialog} // For empty list and footer button
               showSelectAll={selectedView !== 'trash' && sortedTasks.length > 0}
               projects={projectList}
+              activityCategories={activityCategories}
               onUpdateTask={handleDirectTaskUpdate}
             />
           )}

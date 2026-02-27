@@ -33,6 +33,7 @@ interface ActiveTasksDisplayProps {
     onOpenCreateDialog: () => void; // For footer button and empty list button
     showSelectAll: boolean; // To control visibility of header checkbox
     projects?: { id?: number; name: string }[];
+    activityCategories?: { id?: number; name: string; color?: string; icon?: string }[];
     onUpdateTask?: (task: Task) => void;
 }
 
@@ -59,6 +60,7 @@ export function ActiveTasksDisplay({
     onOpenCreateDialog,
     showSelectAll,
     projects,
+    activityCategories,
     onUpdateTask,
 }: ActiveTasksDisplayProps) {
 
@@ -98,6 +100,7 @@ export function ActiveTasksDisplay({
                         onPomodoroClick={onPomodoroClick}
                         onOpenCreateDialog={onOpenCreateDialog}
                         projects={projects}
+                        activityCategories={activityCategories}
                         onUpdateTask={onUpdateTask}
                     />
                 ) : (
@@ -113,6 +116,7 @@ export function ActiveTasksDisplay({
                         onAddTaskToTimeline={onAddTaskToTimeline}
                         onPomodoroClick={onPomodoroClick}
                         projects={projects}
+                        activityCategories={activityCategories}
                         onUpdateTask={onUpdateTask}
                     />
                 )}

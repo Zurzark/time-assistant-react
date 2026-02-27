@@ -22,6 +22,7 @@ interface TaskListProps {
     // Callback for empty state button
     onOpenCreateDialog: () => void;
     projects?: { id?: number; name: string }[];
+    activityCategories?: { id?: number; name: string; color?: string; icon?: string }[];
     onUpdateTask?: (task: Task) => void;
 }
 
@@ -40,6 +41,7 @@ export function TaskList({
     onPomodoroClick,
     onOpenCreateDialog,
     projects,
+    activityCategories,
     onUpdateTask,
 }: TaskListProps) {
     if (tasks.length > 0) {
@@ -60,6 +62,7 @@ export function TaskList({
                         onAddTaskToTimeline={onAddTaskToTimeline}
                         onPomodoroClick={onPomodoroClick}
                         projects={projects}
+                        activityCategories={activityCategories}
                         onUpdateTask={onUpdateTask}
                     />
                 ))}

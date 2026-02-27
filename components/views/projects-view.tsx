@@ -33,7 +33,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CalendarIcon } from "@radix-ui/react-icons"
-import { format } from "date-fns"
+import { format, differenceInCalendarDays } from "date-fns"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -444,6 +444,24 @@ export function ProjectsView() {
     }
   }
   
+  const calculateTimeProgress = (createdAt: Date, dueDate?: Date) => {
+    if (!dueDate) return null;
+    
+    // 按整天计算时间差
+    const now = new Date();
+    // 总天数 = 截止日期 - 创建日期 + 1 (因为创建当天就算1天)
+    const totalDays = differenceInCalendarDays(dueDate, createdAt) + 1;
+    
+    // 如果截止日期早于创建日期，则进度为100%
+    if (totalDays <= 0) return 100;
+    
+    // 已经过天数 = 当前日期 - 创建日期 + 1
+    // 如果当前日期早于创建日期（理论上不应发生，但防止异常），取1
+    const elapsedDays = Math.max(1, differenceInCalendarDays(now, createdAt) + 1);
+    
+    return Math.min(100, Math.max(0, Math.round((elapsedDays / totalDays) * 100)));
+  };
+
   const filteredProjects = projects.filter((project) => {
     if (selectedTab === "all") return true
     return project && project.status === selectedTab;
@@ -631,7 +649,29 @@ export function ProjectsView() {
                         <span>进度</span>
                         <span className="font-medium">{project.progress || 0}%</span>
                       </div>
-                      <Progress value={project.progress || 0} className="h-2" />
+                      <div className="relative pt-1">
+                        <Progress value={project.progress || 0} className="h-2" />
+                        {(() => {
+                          const timeProgress = calculateTimeProgress(project.createdAt, project.dueDate);
+                          if (timeProgress !== null) {
+                            const now = new Date();
+                            const elapsedDays = Math.max(1, differenceInCalendarDays(now, project.createdAt) + 1);
+                            const totalDays = differenceInCalendarDays(project.dueDate!, project.createdAt) + 1;
+                            
+                            return (
+                              <div 
+                                className="absolute top-0 h-4 w-0.5 bg-red-500 z-10"
+                                style={{ 
+                                  left: `${timeProgress}%`,
+                                  transform: 'translateX(-50%)'
+                                }}
+                                title={`时间进度: ${timeProgress}% (已过 ${elapsedDays}/${totalDays} 天, 截止: ${format(new Date(project.dueDate!), "yyyy-MM-dd")})`}
+                              />
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between">
@@ -710,7 +750,29 @@ export function ProjectsView() {
                 )}
                 <div>
                   <h3 className="text-lg font-medium">进度</h3>
-                  <Progress value={selectedProject.progress || 0} className="h-2" />
+                  <div className="relative pt-1">
+                    <Progress value={selectedProject.progress || 0} className="h-2" />
+                    {(() => {
+                      const timeProgress = calculateTimeProgress(selectedProject.createdAt, selectedProject.dueDate);
+                      if (timeProgress !== null) {
+                        const now = new Date();
+                        const elapsedDays = Math.max(1, differenceInCalendarDays(now, selectedProject.createdAt) + 1);
+                        const totalDays = differenceInCalendarDays(selectedProject.dueDate!, selectedProject.createdAt) + 1;
+
+                        return (
+                          <div 
+                            className="absolute top-0 h-4 w-0.5 bg-red-500 z-10"
+                            style={{ 
+                              left: `${timeProgress}%`,
+                              transform: 'translateX(-50%)'
+                            }}
+                            title={`时间进度: ${timeProgress}% (已过 ${elapsedDays}/${totalDays} 天, 截止: ${format(new Date(selectedProject.dueDate!), "yyyy-MM-dd")})`}
+                          />
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
                 </div>
                 <div>
                   <h3 className="text-lg font-medium">状态</h3>

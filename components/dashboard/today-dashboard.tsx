@@ -57,6 +57,7 @@ export function TodayDashboard() {
     setIsSelectTimeModalOpen,
     taskForTimelineModal,
     handleConfirmTimeRangeAndAddTask,
+    activityCategories, // Destructure activityCategories
     // We might need other things from useTaskData if interaction is deeper, but for now, this is minimal.
   } = useTaskData();
 
@@ -254,6 +255,7 @@ export function TodayDashboard() {
                 onPomodoroClick={handlePomodoroClick}
                 onOpenUnifiedAddModalForNewTask={handleOpenUnifiedAddModalForNewTask}
                 projects={projects}
+                activityCategories={activityCategories}
                 onUpdateTask={handleTaskPropertyUpdate}
               />
             </div>

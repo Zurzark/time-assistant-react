@@ -18,6 +18,7 @@ interface TaskBoardViewProps {
     onAddTaskToTimeline: (task: Task) => void;
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
     projects?: { id?: number; name: string }[];
+    activityCategories?: { id?: number; name: string; color?: string; icon?: string }[];
     onUpdateTask?: (task: Task) => void;
 }
 

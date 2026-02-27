@@ -63,6 +63,7 @@ interface TaskItemProps {
     onAddTaskToTimeline: (task: Task) => void;
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
     projects?: { id?: number; name: string }[];
+    activityCategories?: { id?: number; name: string; color?: string; icon?: string }[];
     onUpdateTask?: (task: Task) => void;
 }
 
@@ -79,6 +80,30 @@ const PriorityDisplay: React.FC<{ priority: TaskPriority | undefined }> = ({ pri
         <span className={cn("flex items-center text-xs", style.color)}>
             <span className={cn("h-2 w-2 rounded-full mr-1.5", style.dotColor)} />
             {style.text}
+        </span>
+    );
+};
+
+const ActivityCategoryDisplay: React.FC<{ categoryId: number | undefined; categories: { id?: number; name: string; color?: string; icon?: string }[] | undefined; className?: string }> = ({ categoryId, categories, className }) => {
+    if (!categoryId || !categories) return null;
+    const category = categories.find(c => c.id === categoryId);
+    if (!category) return null;
+
+    return (
+        <Badge variant="outline" className={cn("text-xs px-2 py-0.5 border-transparent bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 flex items-center", className)}>
+             {category.color && <span className="w-1.5 h-1.5 rounded-full mr-1.5" style={{ backgroundColor: category.color }}></span>}
+             {/* If icon is a simple string emoji or similar, render it. If it needs icon mapping, that's more complex. Assuming name is main identifier */}
+            {category.name}
+        </Badge>
+    );
+};
+
+const EstimatedDurationDisplay: React.FC<{ hours: number | undefined }> = ({ hours }) => {
+    if (!hours || hours <= 0) return null;
+    return (
+        <span className="flex items-center text-xs text-gray-500 dark:text-gray-400" title="预估用时">
+            <Hourglass className="h-3 w-3 mr-1" />
+            {hours}h
         </span>
     );
 };
@@ -135,6 +160,7 @@ export function TaskItem({
     onAddTaskToTimeline,
     onPomodoroClick,
     projects = [],
+    activityCategories = [],
     onUpdateTask,
 }: TaskItemProps) {
     if (!task || task.id === undefined) {
@@ -261,6 +287,7 @@ export function TaskItem({
                                             </Badge>
                                         )
                                     )}
+                                    <ActivityCategoryDisplay categoryId={task.defaultActivityCategoryId} categories={activityCategories} className="ml-2 flex-shrink-0" />
                                     {/* "即将到期" (1-2 days away) visual cue */}
                                     {task.dueDate && !task.completed && !isOverdue && (() => {
                                         const today = startOfDay(new Date());
@@ -343,6 +370,7 @@ export function TaskItem({
                                             </Badge>
                                         ))}
                                         <TaskCategorySelector task={task} onUpdate={handleTaskUpdate} />
+                                        <EstimatedDurationDisplay hours={task.estimatedDurationHours} />
                                     </>
                                 ) : (
                                     <>
@@ -361,6 +389,7 @@ export function TaskItem({
                                                 
                                             </span>
                                         )}
+                                        <EstimatedDurationDisplay hours={task.estimatedDurationHours} />
                                         {task.tags && task.tags.map((tag) => (
                                             <Badge key={tag} variant="secondary" className="text-xs px-2 py-0.5 bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300 border-transparent">
                                                 <TagIcon className="h-3 w-3 mr-1" />
@@ -510,12 +539,14 @@ export function TaskItem({
                                     {isToday(new Date(task.dueDate)) && !task.completed && !isOverdue && <span className="ml-1 font-medium text-blue-600 dark:text-blue-400">(今日)</span>}
                                 </Badge>
                             )}
+                             <EstimatedDurationDisplay hours={task.estimatedDurationHours} />
                              {task.projectId && (
                                 <Badge variant="outline" className="text-xs px-1.5 py-0.5 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
                                     <FolderOpen className="h-3 w-3 mr-1 opacity-60"/>
                                     {getProjectNameById(task.projectId)?.substring(0,10) + (getProjectNameById(task.projectId)?.length > 10 ? '...' : '')}
                                 </Badge>
                             )}
+                             <ActivityCategoryDisplay categoryId={task.defaultActivityCategoryId} categories={activityCategories} />
                             {task.tags && task.tags.slice(0, 1).map((tag) => (
                                 <Badge key={tag} variant="secondary" className="text-xs px-1.5 py-0.5 bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300 border-transparent">
                                     <TagIcon className="h-3 w-3 mr-0.5" />
