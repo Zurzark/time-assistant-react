@@ -277,8 +277,8 @@ export function AnalyticsView() {
 
             <Card>
               <CardHeader>
-                <CardTitle>时间分配详情</CardTitle>
-                <CardDescription>各类活动所占时间百分比</CardDescription>
+                <CardTitle>类别耗时排行</CardTitle>
+                <CardDescription>各类活动总投入时长</CardDescription>
               </CardHeader>
               <CardContent>
                 {timeAllocationData.length > 0 && timeAllocationData.some(item => item.value > 0) ? (
@@ -287,7 +287,10 @@ export function AnalyticsView() {
                       <div key={item.name} className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-sm">{item.name}</span>
-                          <span className="font-medium">{item.value}%</span>
+                          <div className="text-right">
+                            <span className="font-medium block">{item.rawValue ? (item.rawValue).toFixed(1) : 0}小时</span>
+                            <span className="text-xs text-muted-foreground">{item.value}%</span>
+                          </div>
                         </div>
                         <div className="w-full bg-muted rounded-full h-2">
                           <div
@@ -364,27 +367,33 @@ export function AnalyticsView() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
-                <CardTitle>目标完成进度</CardTitle>
-                <CardDescription>您的长期目标完成情况</CardDescription>
+                <CardTitle>目标时间投入</CardTitle>
+                <CardDescription>各个目标实际投入的时间对比</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="h-[400px]">
-                  <BarChart
-                    data={goalsProgressData}
-                    index="name"
-                    categories={["已完成"]}
-                    colors={["blue"]}
-                    valueFormatter={(value) => `${value}%`}
-                    yAxisWidth={40}
-                  />
+                  {goalsProgressData.length > 0 && goalsProgressData.some(g => g.timeSpent > 0) ? (
+                    <BarChart
+                      data={goalsProgressData}
+                      index="name"
+                      categories={["timeSpent"]}
+                      colors={["blue"]}
+                      valueFormatter={(value) => `${value}h`}
+                      yAxisWidth={40}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+                        暂无目标时间投入数据
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>目标详情</CardTitle>
-                <CardDescription>各个目标的完成进度</CardDescription>
+                <CardTitle>目标进度详情</CardTitle>
+                <CardDescription>各个目标的当前完成进度</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-6">
@@ -392,7 +401,10 @@ export function AnalyticsView() {
                     <div key={goal.name} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="font-medium">{goal.name}</span>
-                        <span className="text-sm text-muted-foreground">{goal["已完成"]}%</span>
+                        <div className="text-right">
+                            <span className="text-sm font-medium">{goal["已完成"]}%</span>
+                            <span className="text-xs text-muted-foreground block">投入: {goal.timeSpent}h</span>
+                        </div>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2.5">
                         <div className="bg-primary h-2.5 rounded-full" style={{ width: `${goal["已完成"]}%` }} />
@@ -433,26 +445,32 @@ export function AnalyticsView() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
-                <CardTitle>项目完成进度</CardTitle>
-                <CardDescription>您的项目完成情况</CardDescription>
+                <CardTitle>项目任务负载</CardTitle>
+                <CardDescription>各项目待办任务数量分布</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="h-[400px]">
-                  <BarChart
-                    data={projectsProgressData}
-                    index="name"
-                    categories={["已完成"]}
-                    colors={["violet"]}
-                    valueFormatter={(value) => `${value}%`}
-                    yAxisWidth={40}
-                  />
+                  {projectsProgressData.length > 0 && projectsProgressData.some(p => p.pendingTasks > 0) ? (
+                    <BarChart
+                      data={projectsProgressData}
+                      index="name"
+                      categories={["pendingTasks"]}
+                      colors={["violet"]}
+                      valueFormatter={(value) => `${value}个`}
+                      yAxisWidth={40}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+                        暂无项目待办任务数据
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>项目详情</CardTitle>
+                <CardTitle>项目进度详情</CardTitle>
                 <CardDescription>各个项目的完成进度</CardDescription>
               </CardHeader>
               <CardContent>
@@ -461,7 +479,12 @@ export function AnalyticsView() {
                     <div key={project.name} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="font-medium">{project.name}</span>
-                        <span className="text-sm text-muted-foreground">{project["已完成"]}%</span>
+                        <div className="text-right">
+                            <span className="text-sm font-medium">{project["已完成"]}%</span>
+                            <span className="text-xs text-muted-foreground block">
+                                {project.completedTasks}/{project.totalTasks} 完成
+                            </span>
+                        </div>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2.5">
                         <div className="bg-violet-500 h-2.5 rounded-full" style={{ width: `${project["已完成"]}%` }} />

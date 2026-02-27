@@ -213,12 +213,24 @@ export function useAnalyticsData(dateRange: DateRangeType) {
         })
         setHeatmapData(hmData)
 
-        // --- 5. Goals Progress ---
-        const goalsData = goals.map(g => ({
-          name: g.name,
-          "已完成": g.progress || 0,
-          "总进度": 100
-        }))
+        // --- 5. Goals Progress & Time Spent ---
+        const goalsData = goals.map(g => {
+            // Calculate time spent on this goal in the selected range
+            const timeSpent = blocksInRange.filter(b => {
+                if (b.taskId) {
+                    const t = tasks.find(task => task.id === b.taskId)
+                    return t?.goalId === g.id
+                }
+                return false
+            }).reduce((acc, b) => acc + getBlockDurationHours(b), 0)
+
+            return {
+                name: g.name,
+                "已完成": g.progress || 0,
+                "总进度": 100,
+                timeSpent: Math.round(timeSpent * 10) / 10 // Round to 1 decimal
+            }
+        })
         setGoalsProgressData(goalsData)
 
         // --- Goal Trend (Completed tasks linked to goals within range) ---
@@ -270,21 +282,33 @@ export function useAnalyticsData(dateRange: DateRangeType) {
         
         setGoalTrendData(trendData)
 
-        // --- 6. Projects Progress ---
-        const projectsData = projects.map(p => ({
-          name: p.name,
-          "已完成": p.progress || 0,
-          "总进度": 100,
-          // Calculate time spent on project using blocksInRange (only within selected date range)
-          timeSpent: blocksInRange.filter(b => {
-            // Check if block is linked to a task that is linked to this project
+        // --- 6. Projects Progress & Task Stats ---
+        const projectsData = projects.map(p => {
+          // Calculate time spent on project using blocksInRange
+          const timeSpentMs = blocksInRange.filter(b => {
             if (b.taskId) {
                 const t = tasks.find(task => task.id === b.taskId)
                 return t?.projectId === p.id
             }
             return false
           }).reduce((acc, b) => acc + getBlockDurationMs(b), 0)
-        }))
+
+          // Calculate task stats for this project
+          const projectTasks = tasks.filter(t => t.projectId === p.id)
+          const totalTasks = projectTasks.length
+          const completedTasks = projectTasks.filter(t => t.completed === 1).length
+          const pendingTasks = totalTasks - completedTasks
+
+          return {
+            name: p.name,
+            "已完成": p.progress || 0,
+            "总进度": 100,
+            timeSpent: timeSpentMs,
+            totalTasks,
+            completedTasks,
+            pendingTasks
+          }
+        })
         setProjectsProgressData(projectsData)
 
         setLoading(false)
