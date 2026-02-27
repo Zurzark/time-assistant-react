@@ -199,6 +199,11 @@ export function TasksView() {
     openPomodoroForTask(taskId, taskTitle);
   };
 
+  const handleDirectTaskUpdate = async (task: Task) => {
+    if (task.id === undefined) return;
+    await handleUpdateTask(task, task.id);
+  };
+
   // --- Lifecycle Effect for loading initial data for trash view ---
   useEffect(() => {
     if (selectedView === 'trash') {
@@ -341,7 +346,8 @@ export function TasksView() {
               onPomodoroClick={handlePomodoroClickFromItem} // Opens pomodoro dialog
               onOpenCreateDialog={openCreateDialog} // For empty list and footer button
               showSelectAll={selectedView !== 'trash' && sortedTasks.length > 0}
-              // onToggleSubtaskComplete={handleToggleSubtaskComplete} // Pass if ActiveTasksDisplay -> TaskList -> TaskItem needs it
+              projects={projectList}
+              onUpdateTask={handleDirectTaskUpdate}
             />
           )}
         </div>

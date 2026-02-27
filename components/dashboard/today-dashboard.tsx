@@ -11,7 +11,7 @@ import { QuickInboxCard } from "../today/quick-inbox-card"
 import { TimelineCard } from "../today/timeline-card"
 import { UnifiedAddModal } from "../common/UnifiedAddModal"
 import { TodayFocusTasks } from "../today/TodayFocusTasks"
-import { Task as TaskUtilsTask } from "@/lib/task-utils"
+import { Task as TaskUtilsTask, toDBTaskShape } from "@/lib/task-utils"
 import * as db from "@/lib/db"
 import { toast } from "sonner"
 
@@ -194,6 +194,27 @@ export function TodayDashboard() {
     openTimeSelectModal(task); 
   };
 
+  const handleTaskPropertyUpdate = async (updatedTask: TaskUtilsTask) => {
+    if (updatedTask.id === undefined) return;
+    try {
+        const existingTask = await db.get<db.Task>(db.ObjectStores.TASKS, updatedTask.id);
+        if (!existingTask) {
+            console.warn(`Task ${updatedTask.id} not found for update`);
+            return;
+        }
+
+        const dbTaskUpdates = toDBTaskShape(updatedTask);
+        const mergedTask = { ...existingTask, ...dbTaskUpdates, id: updatedTask.id, updatedAt: new Date() };
+
+        await db.update(db.ObjectStores.TASKS, mergedTask);
+        triggerTodayFocusRefresh();
+        window.dispatchEvent(new CustomEvent('taskDataChangedForStats'));
+    } catch (error) {
+        console.error("Failed to update task property:", error);
+        toast.error("更新任务失败");
+    }
+  };
+
   return (
     <TaskStatsProvider>
       <DatabaseInitializer />
@@ -232,6 +253,8 @@ export function TodayDashboard() {
                 onAddTaskToTimeline={handleOpenTimeSelectModalForTask}
                 onPomodoroClick={handlePomodoroClick}
                 onOpenUnifiedAddModalForNewTask={handleOpenUnifiedAddModalForNewTask}
+                projects={projects}
+                onUpdateTask={handleTaskPropertyUpdate}
               />
             </div>
           </div>

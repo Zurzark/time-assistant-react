@@ -32,6 +32,8 @@ interface ActiveTasksDisplayProps {
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
     onOpenCreateDialog: () => void; // For footer button and empty list button
     showSelectAll: boolean; // To control visibility of header checkbox
+    projects?: { id?: number; name: string }[];
+    onUpdateTask?: (task: Task) => void;
 }
 
 export function ActiveTasksDisplay({
@@ -55,7 +57,9 @@ export function ActiveTasksDisplay({
     onAddTaskToTimeline,
     onPomodoroClick,
     onOpenCreateDialog,
-    showSelectAll
+    showSelectAll,
+    projects,
+    onUpdateTask,
 }: ActiveTasksDisplayProps) {
 
     const completedTaskCount = sortedTasks.filter(task => task.completed).length;
@@ -93,6 +97,8 @@ export function ActiveTasksDisplay({
                         onAddTaskToTimeline={onAddTaskToTimeline}
                         onPomodoroClick={onPomodoroClick}
                         onOpenCreateDialog={onOpenCreateDialog}
+                        projects={projects}
+                        onUpdateTask={onUpdateTask}
                     />
                 ) : (
                     <TaskBoardView
@@ -106,6 +112,8 @@ export function ActiveTasksDisplay({
                         onToggleFrogStatus={onToggleFrogStatus}
                         onAddTaskToTimeline={onAddTaskToTimeline}
                         onPomodoroClick={onPomodoroClick}
+                        projects={projects}
+                        onUpdateTask={onUpdateTask}
                     />
                 )}
             </CardContent>

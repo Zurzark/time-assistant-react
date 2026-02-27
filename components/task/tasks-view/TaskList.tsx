@@ -21,9 +21,8 @@ interface TaskListProps {
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
     // Callback for empty state button
     onOpenCreateDialog: () => void;
-    // Callback for subtask completion (to be passed to TaskItem if it handles it directly)
-    // For now, assuming top-level useTaskData handles subtask completion via task.id and subtask.id
-    // onToggleSubtaskComplete: (taskId: number, subtaskId: number) => void; 
+    projects?: { id?: number; name: string }[];
+    onUpdateTask?: (task: Task) => void;
 }
 
 export function TaskList({
@@ -40,6 +39,8 @@ export function TaskList({
     onAddTaskToTimeline,
     onPomodoroClick,
     onOpenCreateDialog,
+    projects,
+    onUpdateTask,
 }: TaskListProps) {
     if (tasks.length > 0) {
         return (
@@ -58,7 +59,8 @@ export function TaskList({
                         onToggleFrogStatus={onToggleFrogStatus}
                         onAddTaskToTimeline={onAddTaskToTimeline}
                         onPomodoroClick={onPomodoroClick}
-                        // onToggleSubtaskComplete={onToggleSubtaskComplete} // Pass if TaskItem handles subtasks directly
+                        projects={projects}
+                        onUpdateTask={onUpdateTask}
                     />
                 ))}
             </div>

@@ -17,6 +17,8 @@ interface TaskBoardViewProps {
     onToggleFrogStatus: (taskId: number) => void;
     onAddTaskToTimeline: (task: Task) => void;
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
+    projects?: { id?: number; name: string }[];
+    onUpdateTask?: (task: Task) => void;
 }
 
 // 定义象限配置

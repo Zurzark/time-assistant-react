@@ -13,6 +13,12 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+    TaskProjectSelector,
+    TaskPrioritySelector,
+    TaskCategorySelector,
+    TaskDateSelector,
+} from "./task-attribute-selectors";
+import {
     AlertTriangle,
     ArrowDown,
     ArrowUp,
@@ -56,6 +62,8 @@ interface TaskItemProps {
     onToggleFrogStatus: (taskId: number) => void;
     onAddTaskToTimeline: (task: Task) => void;
     onPomodoroClick: (taskId: number, taskTitle: string) => void;
+    projects?: { id?: number; name: string }[];
+    onUpdateTask?: (task: Task) => void;
 }
 
 const PriorityDisplay: React.FC<{ priority: TaskPriority | undefined }> = ({ priority }) => {
@@ -126,6 +134,8 @@ export function TaskItem({
     onToggleFrogStatus,
     onAddTaskToTimeline,
     onPomodoroClick,
+    projects = [],
+    onUpdateTask,
 }: TaskItemProps) {
     if (!task || task.id === undefined) {
         console.error("TaskItem received invalid task prop:", task);
@@ -200,6 +210,12 @@ export function TaskItem({
         );
     }
 
+    const handleTaskUpdate = (updatedTask: Task) => {
+        if (onUpdateTask) {
+            onUpdateTask(updatedTask);
+        }
+    };
+
     if (viewMode === 'list') {
         return (
             <div className={effectiveCardClasses} onClick={handleCardClick}>
@@ -228,11 +244,22 @@ export function TaskItem({
                                         {task.title}
                                     </h3>
                                     <RecurringTaskIndicator task={task} />
-                                    {task.description && (
-                                        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
-                                            <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
-                                            {task.description}
-                                        </span>
+                                    {projects.length > 0 && onUpdateTask ? (
+                                        <div className="ml-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                                            <TaskProjectSelector
+                                                task={task}
+                                                onUpdate={handleTaskUpdate}
+                                                projects={projects}
+                                                getProjectNameById={getProjectNameById}
+                                            />
+                                        </div>
+                                    ) : (
+                                        task.projectId && (
+                                            <Badge variant="outline" className="ml-2 text-xs px-2 py-0.5 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 flex-shrink-0">
+                                                <FolderOpen className="h-3 w-3 mr-1 opacity-70" />
+                                                {getProjectNameById(task.projectId)}
+                                            </Badge>
+                                        )
                                     )}
                                     {/* "即将到期" (1-2 days away) visual cue */}
                                     {task.dueDate && !task.completed && !isOverdue && (() => {
@@ -294,37 +321,55 @@ export function TaskItem({
                             </div>
                         </div>
 
+                        {/* Middle Row: Description */}
+                        {task.description && (
+                            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 mb-1 truncate">
+                                {task.description.length > 20 ? `${task.description.substring(0, 20)}...` : task.description}
+                            </div>
+                        )}
+
                         {/* Third Row: Attributes & Metadata */} 
                         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400 pt-0.5">
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                {task.priority && <PriorityDisplay priority={task.priority} />}
-                                {task.plannedDate && (
-                                    <span className="flex items-center">
-                                        <Clock className="h-3.5 w-3.5 mr-1" />
-                                        {format(task.plannedDate, 'yyyy/MM/dd')} (计划)
-                                    </span>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1" onClick={(e) => e.stopPropagation()}>
+                                {onUpdateTask ? (
+                                    <>
+                                        <TaskPrioritySelector task={task} onUpdate={handleTaskUpdate} />
+                                        <TaskDateSelector task={task} onUpdate={handleTaskUpdate} type="planned" />
+                                        <TaskDateSelector task={task} onUpdate={handleTaskUpdate} type="due" />
+                                        {task.tags && task.tags.map((tag) => (
+                                            <Badge key={tag} variant="secondary" className="text-xs px-2 py-0.5 bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300 border-transparent">
+                                                <TagIcon className="h-3 w-3 mr-1" />
+                                                {tag}
+                                            </Badge>
+                                        ))}
+                                        <TaskCategorySelector task={task} onUpdate={handleTaskUpdate} />
+                                    </>
+                                ) : (
+                                    <>
+                                        {task.priority && <PriorityDisplay priority={task.priority} />}
+                                        {task.plannedDate && (
+                                            <span className="flex items-center">
+                                                <Clock className="h-3.5 w-3.5 mr-1" />
+                                                {format(task.plannedDate, 'yyyy/MM/dd')} (计划)
+                                            </span>
+                                        )}
+                                        {task.dueDate && (
+                                            <span className={cn("flex items-center", isOverdue && "text-red-600 dark:text-red-500 font-medium")}>
+                                                <Calendar className="h-3.5 w-3.5 mr-1" />
+                                                {format(task.dueDate, 'yyyy/MM/dd')} (截止)
+                                                {isOverdue && <AlertTriangle className="h-3.5 w-3.5 ml-1 text-red-500" />}
+                                                
+                                            </span>
+                                        )}
+                                        {task.tags && task.tags.map((tag) => (
+                                            <Badge key={tag} variant="secondary" className="text-xs px-2 py-0.5 bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300 border-transparent">
+                                                <TagIcon className="h-3 w-3 mr-1" />
+                                                {tag}
+                                            </Badge>
+                                        ))}
+                                        {task.category && <TaskCategoryDisplay category={task.category} />}
+                                    </>
                                 )}
-                                {task.dueDate && (
-                                    <span className={cn("flex items-center", isOverdue && "text-red-600 dark:text-red-500 font-medium")}>
-                                        <Calendar className="h-3.5 w-3.5 mr-1" />
-                                        {format(task.dueDate, 'yyyy/MM/dd')} (截止)
-                                        {isOverdue && <AlertTriangle className="h-3.5 w-3.5 ml-1 text-red-500" />}
-                                        
-                                    </span>
-                                )}
-                                {task.projectId && (
-                                    <Badge variant="outline" className="text-xs px-2 py-0.5 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
-                                        <FolderOpen className="h-3 w-3 mr-1 opacity-70" />
-                                        {getProjectNameById(task.projectId)}
-                                    </Badge>
-                                )}
-                                {task.tags && task.tags.map((tag) => (
-                                    <Badge key={tag} variant="secondary" className="text-xs px-2 py-0.5 bg-teal-50 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300 border-transparent">
-                                        <TagIcon className="h-3 w-3 mr-1" />
-                                        {tag}
-                                    </Badge>
-                                ))}
-                                {task.category && <TaskCategoryDisplay category={task.category} />}
                             </div>
                             {/* Metadata - Moved to the end of 3rd row for compactness */} 
                             {(task.createdAt || (task as any).updatedAt) && (
