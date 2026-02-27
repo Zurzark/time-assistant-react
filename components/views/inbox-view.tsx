@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Archive, ArrowRight, Clock, Flag, MoreHorizontal, Plus, Target, Trash2, Inbox, Zap } from "lucide-react"
+import { Archive, ArrowRight, Clock, Flag, MoreHorizontal, Plus, Target, Trash2, Inbox, Zap, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, isRecent } from "@/lib/date-utils"
-import { InboxItem, addInboxItem, getUnprocessedInboxItems, updateInboxItemsStatus, deleteInboxItem, clearUnprocessedInboxItems } from "@/lib/db"
+import { InboxItem, addInboxItem, getUnprocessedInboxItems, updateInboxItemsStatus, deleteInboxItem, clearUnprocessedInboxItems, updateInboxItem } from "@/lib/db"
 import { AddInboxItemDialog } from "@/components/inbox/add-inbox-item-dialog"
 import { ConvertToTaskDialog } from "@/components/inbox/convert-to-task-dialog"
 import { ConvertToGoalDialog } from "@/components/inbox/convert-to-goal-dialog"
@@ -33,6 +33,45 @@ export function InboxView() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [isAIModalOpen, setIsAIModalOpen] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editContent, setEditContent] = useState("")
+
+  const startEditing = (item: InboxItem) => {
+    setEditingId(item.id!)
+    setEditContent(item.content)
+  }
+
+  const saveEditing = async () => {
+    if (!editingId) return
+    if (!editContent.trim()) {
+      setEditingId(null)
+      return
+    }
+    
+    try {
+      const item = inboxItems.find(i => i.id === editingId)
+      if (item) {
+        const updatedItem = { ...item, content: editContent.trim(), updatedAt: new Date() }
+        await updateInboxItem(updatedItem)
+        
+        // Update both inboxItems and filteredItems to reflect changes immediately
+        const updateList = (list: InboxItem[]) => list.map(i => i.id === editingId ? updatedItem : i)
+        setInboxItems(updateList(inboxItems))
+        setFilteredItems(updateList(filteredItems))
+        
+        toast.success("已更新条目")
+      }
+    } catch (error) {
+      console.error("更新收集篮条目失败:", error)
+      toast.error("更新失败")
+    }
+    setEditingId(null)
+  }
+
+  const cancelEditing = () => {
+    setEditingId(null)
+    setEditContent("")
+  }
 
   // 获取选中的条目
   const getSelectedInboxItems = () => {
@@ -359,9 +398,29 @@ export function InboxView() {
                           className="mt-1"
                         />
                         <div className="flex-1 space-y-1">
-                          <p className="text-sm">{item.content}</p>
-                          {item.notes && <p className="text-xs text-muted-foreground line-clamp-1">{item.notes}</p>}
-                          <p className="text-xs text-muted-foreground">{formatRelativeTime(new Date(item.createdAt))}</p>
+                          {editingId === item.id ? (
+                            <div className="flex items-center gap-2">
+                                <Input 
+                                    value={editContent} 
+                                    onChange={(e) => setEditContent(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") saveEditing()
+                                        else if (e.key === "Escape") cancelEditing()
+                                    }}
+                                    className="h-8 text-sm"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                                <Button size="sm" onClick={(e) => { e.stopPropagation(); saveEditing() }} className="h-8 px-2">保存</Button>
+                                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); cancelEditing() }} className="h-8 px-2">取消</Button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm">{item.content}</p>
+                              {item.notes && <p className="text-xs text-muted-foreground line-clamp-1">{item.notes}</p>}
+                              <p className="text-xs text-muted-foreground">{formatRelativeTime(new Date(item.createdAt))}</p>
+                            </>
+                          )}
                         </div>
                         <div className="flex items-center">
                           <DropdownMenu>
@@ -371,6 +430,10 @@ export function InboxView() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => startEditing(item)}>
+                                <Pencil className="h-4 w-4 mr-2" />
+                                编辑
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleItemAction(item.id!, "convert-to-task")}>
                                 <Flag className="h-4 w-4 mr-2" />
                                 转化为任务
@@ -433,9 +496,29 @@ export function InboxView() {
                           className="mt-1"
                         />
                         <div className="flex-1 space-y-1">
-                          <p className="text-sm">{item.content}</p>
-                          {item.notes && <p className="text-xs text-muted-foreground line-clamp-1">{item.notes}</p>}
-                          <p className="text-xs text-muted-foreground">{formatRelativeTime(new Date(item.createdAt))}</p>
+                          {editingId === item.id ? (
+                            <div className="flex items-center gap-2">
+                                <Input 
+                                    value={editContent} 
+                                    onChange={(e) => setEditContent(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") saveEditing()
+                                        else if (e.key === "Escape") cancelEditing()
+                                    }}
+                                    className="h-8 text-sm"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                                <Button size="sm" onClick={(e) => { e.stopPropagation(); saveEditing() }} className="h-8 px-2">保存</Button>
+                                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); cancelEditing() }} className="h-8 px-2">取消</Button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm">{item.content}</p>
+                              {item.notes && <p className="text-xs text-muted-foreground line-clamp-1">{item.notes}</p>}
+                              <p className="text-xs text-muted-foreground">{formatRelativeTime(new Date(item.createdAt))}</p>
+                            </>
+                          )}
                         </div>
                         <div className="flex items-center">
                           <DropdownMenu>
@@ -445,6 +528,10 @@ export function InboxView() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => startEditing(item)}>
+                                <Pencil className="h-4 w-4 mr-2" />
+                                编辑
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleItemAction(item.id!, "convert-to-task")}>
                                 <Flag className="h-4 w-4 mr-2" />
                                 转化为任务

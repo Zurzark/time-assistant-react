@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Plus, Inbox } from "lucide-react"
-import { InboxItem, addInboxItem, getUnprocessedInboxItems, deleteInboxItem } from "@/lib/db"
+import { InboxItem, addInboxItem, getUnprocessedInboxItems, deleteInboxItem, updateInboxItem } from "@/lib/db"
 import { toast } from "sonner"
 import { InboxAIItem, InboxAIToolbar } from "@/components/ai-features/quick-inbox-ai"
 import { AIAnalysisModal } from "@/components/ai-features/ai-analysis-modal"
@@ -72,6 +72,24 @@ export function QuickInboxCard() {
     } catch (error) {
       console.error("添加收集篮条目失败:", error)
       toast.error("添加失败")
+    }
+  }
+
+  // 更新条目
+  const updateItem = async (id: number, content: string) => {
+    try {
+      const item = inboxItems.find(i => i.id === id)
+      if (!item) return
+
+      const updatedItem = { ...item, content, updatedAt: new Date() }
+      await updateInboxItem(updatedItem)
+      
+      // 更新本地状态
+      setInboxItems(inboxItems.map(i => i.id === id ? updatedItem : i))
+      toast.success("已更新条目")
+    } catch (error) {
+      console.error("更新收集篮条目失败:", error)
+      toast.error("更新失败")
     }
   }
 
@@ -182,6 +200,7 @@ export function QuickInboxCard() {
                   isSelected={selectedIds.has(item.id!)}
                   onToggle={handleToggleItem}
                   onDelete={deleteItem}
+                  onUpdate={updateItem}
                 />
               ))
             ) : (
