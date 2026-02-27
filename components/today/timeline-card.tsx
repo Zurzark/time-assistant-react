@@ -98,8 +98,6 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
   const [externalModalInitialData, setExternalModalInitialData] = useState<Partial<DBTimeBlock & { originalPlan?: { startTime: Date; endTime: Date } } | undefined>>(undefined);
 
   const isProcessingFixedBreaksRef = useRef(false);
-  const cardContentRef = useRef<HTMLDivElement>(null);
-  const [indicatorPosition, setIndicatorPosition] = useState(0);
 
   const todayDateStringForUI = getTodayDateString();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -381,28 +379,6 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
       window.removeEventListener('timelineShouldUpdate', handleExternalTimelineUpdate);
     };
   }, [fetchTimeBlocks]);
-
-  useEffect(() => {
-    if (cardContentRef.current) {
-      const now = new Date(currentTime);
-      const startOfDayForIndicator = new Date(now);
-      startOfDayForIndicator.setHours(0, 0, 0, 0);
-      const minutesFromStartOfDay = differenceInMinutes(now, startOfDayForIndicator);
-      const totalMinutesInDay = 24 * 60;
-      const clampedMinutes = Math.min(Math.max(minutesFromStartOfDay, 0), totalMinutesInDay);
-      const percentageOfDay = clampedMinutes / totalMinutesInDay;
-      
-      const scrollHeight = cardContentRef.current.scrollHeight;
-      const clientHeight = cardContentRef.current.clientHeight;
-
-      const effectiveHeight = scrollHeight > clientHeight ? scrollHeight : clientHeight;
-      let newPosition = percentageOfDay * effectiveHeight;
-      
-      newPosition = Math.max(0, Math.min(newPosition, effectiveHeight - 2));
-
-      setIndicatorPosition(newPosition);
-    }
-  }, [currentTime, timeBlocks, loading]);
 
   const getIconForSourceType = (sourceType: TimelineUITimeBlock['sourceType'], fixedBreakId?: string, activityCategoryId?: number): ReactNode => {
     const category = activityCategories.find(cat => cat.id === activityCategoryId);
@@ -702,7 +678,7 @@ export function TimelineCard({ onPomodoroClick }: TimelineCardProps) {
         </div>
         <CardDescription>您今日的日程安排 {loading && timeBlocks.length > 0 && "(更新中...)"}</CardDescription>
       </CardHeader>
-      <CardContent ref={cardContentRef} className="pb-2 flex-grow overflow-y-auto relative">
+      <CardContent className="pb-2 flex-grow overflow-y-auto relative">
         <div className="relative">
           {timeBlocks.length > 0 && (
             <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700 z-0"></div>

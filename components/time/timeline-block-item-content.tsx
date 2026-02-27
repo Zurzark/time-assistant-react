@@ -107,33 +107,38 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
   const task = tasks.find((t) => t.id === block.taskId);
   const blockTitle = block.title || (task ? task.title : "未命名活动");
 
-  // 视觉指示其来源类型的图标 (需求 三.1)
-  let SourceTypeDisplayIcon: ReactNode;
-  let sourceTypeDisplayText = "";
+  // 统一的 SourceType 配置
+  const SOURCE_TYPE_CONFIG: Record<string, { icon: ReactNode, label: string, colorClass: string }> = {
+    fixed_break: {
+      icon: <Coffee className="h-4 w-4" />,
+      label: category?.name || "固定休息",
+      colorClass: "bg-green-100 text-green-700 dark:bg-green-700/30 dark:text-green-300"
+    },
+    task_plan: {
+      icon: <ClipboardCheck className="h-4 w-4" />,
+      label: category?.name || "任务计划",
+      colorClass: "bg-indigo-100 text-indigo-700 dark:bg-indigo-700/30 dark:text-indigo-300"
+    },
+    manual_entry: {
+      icon: <Pencil className="h-4 w-4" />,
+      label: category?.name || "手动条目",
+      colorClass: "bg-indigo-100 text-indigo-700 dark:bg-indigo-700/30 dark:text-indigo-300"
+    },
+    pomodoro_log: {
+      icon: <Timer className="h-4 w-4" />,
+      label: "番茄记录",
+      colorClass: "bg-orange-100 text-orange-700 dark:bg-orange-700/30 dark:text-orange-300"
+    },
+    default: {
+      icon: <Activity className="h-4 w-4" />,
+      label: category?.name || "活动",
+      colorClass: "bg-purple-100 text-purple-700"
+    }
+  };
 
-  switch (block.sourceType) {
-    case 'fixed_break':
-      SourceTypeDisplayIcon = <Coffee className="h-4 w-4" />;
-      sourceTypeDisplayText = category?.name || "固定休息";
-      break;
-    case 'task_plan':
-      SourceTypeDisplayIcon = <ClipboardCheck className="h-4 w-4" />;
-      sourceTypeDisplayText = category?.name || "任务计划";
-      break;
-    case 'manual_entry':
-      SourceTypeDisplayIcon = <Pencil className="h-4 w-4" />;
-      sourceTypeDisplayText = category?.name || "手动条目";
-      break;
-    case 'pomodoro_log':
-      SourceTypeDisplayIcon = <Timer className="h-4 w-4" />;
-      sourceTypeDisplayText = "番茄记录";
-      break;
-    default:
-      SourceTypeDisplayIcon = <Activity className="h-4 w-4" />;
-      sourceTypeDisplayText = category?.name || "活动";
-  }
-  // If a category is present and it has an icon, it could potentially override SourceTypeDisplayIcon or be combined.
-  // For V0, sourceType icon is primary on the left.
+  const config = SOURCE_TYPE_CONFIG[block.sourceType] || SOURCE_TYPE_CONFIG.default;
+  const SourceTypeDisplayIcon = config.icon;
+  const sourceTypeDisplayText = config.label;
 
   // Card styling based on state (需求 四.1 - 方案A/B) -> Rewritten for 需求 三.1 (美化)
   const cardBaseClasses =
@@ -143,13 +148,21 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
   let titleTextStyles = "text-gray-800 dark:text-gray-100";
 
   if (isCurrentBlock) {
-    cardSpecificStyles = "border border-blue-300 dark:border-blue-700 ring-1 ring-blue-300 dark:ring-blue-600 bg-blue-50 dark:bg-blue-900/60";
-    titleTextStyles = "text-blue-700 dark:text-blue-300 group-hover:text-blue-600 dark:group-hover:text-blue-200";
+    // 当前时间块：保持蓝色高亮，强调“正在进行”
+    cardSpecificStyles = "border border-blue-400 dark:border-blue-600 ring-1 ring-blue-400 dark:ring-blue-500 bg-blue-50 dark:bg-blue-900/60 shadow-md";
+    titleTextStyles = "text-blue-700 dark:text-blue-300 font-semibold";
   } else if (block.sourceType === 'fixed_break') {
+    // 固定休息：绿色系
     cardSpecificStyles = "border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 hover:bg-green-100/70 dark:hover:bg-green-900/70";
   } else if (block.isLogged) {
+    // 已记录：白色/默认背景
     cardSpecificStyles = "border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-800"; 
+  } else if (block.sourceType === 'manual_entry' || block.sourceType === 'task_plan') {
+    // 计划项：改为 Indigo/Slate 系，且使用虚线边框，与“正在进行”的实线蓝色区分开
+    cardSpecificStyles = "border border-dashed border-indigo-300 dark:border-indigo-700 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100/50 dark:hover:bg-indigo-900/50";
+    // titleTextStyles = "text-indigo-700 dark:text-indigo-300"; // 可选：让标题也变色
   } else {
+    // 其他兜底
     cardSpecificStyles = "border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-800 hover:bg-gray-50/70 dark:hover:bg-slate-700/60";
   }
   
@@ -232,24 +245,24 @@ export const TimelineBlockItemContent: FC<TimelineBlockItemContentProps> = ({
       {/* Demo style: absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center */}
       <div
         className={cn(
-            "absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center z-10", // Added z-10 to be above the timeline bar
+            "absolute left-0 top-1 h-6 w-6 rounded-full flex items-center justify-center z-10 shadow-sm", // Added z-10 to be above the timeline bar
             // Unified icon background for non-active states
-            isCurrentBlock ? "bg-blue-500 text-white" :
-            block.isLogged ? "bg-green-100 text-green-600" : // Logged items icon remains green
-            block.sourceType === 'fixed_break' ? "bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300" : // Fixed break icon bg: distinct light gray
-            "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" // Default for other planned items
+            isCurrentBlock ? "bg-blue-500 text-white shadow-blue-200 dark:shadow-blue-900" :
+            block.isLogged ? "bg-green-100 text-green-600 dark:bg-green-900/50 dark:text-green-400" : // Logged items icon remains green
+            config.colorClass // Use config colors directly
         )}
-        // Removed style prop, relying on classNames for demo consistency
+        // If the above extraction is too complex, we can just map it manually or trust the config class to be compatible.
+        // Actually, let's just use specific logic based on source type again to be safe and clean, or use a helper.
+        // Better: Use a dedicated iconColorClass in config if we wanted full control.
+        // For now, let's map:
+        // Fixed Break -> Green (from config)
+        // Plan -> Indigo (from config)
         title={sourceTypeDisplayText}
       >
         {/* Icon mapping to match demo (simplified) */}
-        {block.isLogged ? <CheckCircle2 className="h-4 w-4" /> :
-         isCurrentBlock ? <Loader2 className="h-4 w-4 animate-spin" /> :
-         block.sourceType === 'fixed_break' ? <Coffee className="h-4 w-4" /> :
-         block.sourceType === 'task_plan' && task ? <ClipboardCheck className="h-4 w-4" /> :
-         block.sourceType === 'manual_entry' ? <Pencil className="h-4 w-4" /> :
-         block.sourceType === 'pomodoro_log' ? <Timer className="h-4 w-4" /> :
-         <Activity className="h-4 w-4" /> // Default icon
+        {block.isLogged ? <CheckCircle2 className="h-3.5 w-3.5" /> :
+         isCurrentBlock ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> :
+         SourceTypeDisplayIcon
         }
       </div>
 
